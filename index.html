@@ -1,12 +1,12 @@
-
+<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>人臉打卡系統 (概念展示)</title>
+    <title>人臉打卡系統 (Firebase版)</title>
     <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 載入 face-api.js (改回 cdnjs) -->
+    <!-- 載入 face-api.js -->
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         /* 確保 canvas 疊在 video 上面 */
@@ -33,7 +33,7 @@
 <body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
     <div class="container mx-auto max-w-4xl p-8">
-        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">人臉打卡系統 (概念展示)</h1>
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">人臉打卡系統 (Firebase版)</h1>
 
         <!-- 狀態訊息 -->
         <div id="statusMessage" class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative mb-4" role="alert">
@@ -56,23 +56,29 @@
                     <label for="nameInput" class="block text-sm font-medium text-gray-700">輸入姓名進行註冊：</label>
                     <input type="text" id="nameInput" placeholder="例如：王小明" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                     <button id="registerButton" class="w-full bg-indigo-600 text-white font-bold py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-gray-400">
-                        註冊人臉
+                        註冊人臉 (儲存至雲端)
                     </button>
                 </div>
             </div>
 
             <!-- 右側：打卡紀錄 -->
             <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
-                <h2 class="text-xl font-semibold mb-4 text-center">打卡紀錄</h2>
+                <h2 class="text-xl font-semibold mb-4 text-center">打卡紀錄 (來自雲端)</h2>
                 <div id="logContainer" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
                     <!-- 紀錄會動態加在這裡 -->
-                    <p class="text-gray-500 text-center">尚無打卡紀錄...</p>
+                    <p class="text-gray-500 text-center">正在連接 Firebase...</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <script>
+    <script type="module">
+        // --- Firebase SDK Imports ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- DOM 元素 ---
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const statusMessage = document.getElementById('statusMessage');
@@ -80,40 +86,95 @@
         const registerButton = document.getElementById('registerButton');
         const logContainer = document.getElementById('logContainer');
 
-        let registeredFaces = []; // 儲存已註冊的人臉
-        let checkInLog = new Set(); // 儲存已打卡的人名
+        // --- 全局變數 ---
+        let db, auth, userId, appId;
+        let registeredFaces = []; // 本地快取 (從 Firebase 同步)
+        let checkInLog = new Set(); // 本地快取 (防止重複打卡)
         let faceMatcher;
+        let facesCollectionRef, checkInsCollectionRef; // Firestore 引用
 
-        // 1. 加載模型
+        // 1. 加載 face-api 模型
         async function loadModels() {
-            // 修正：將模型 URL 指向與 face-api.js 腳本一致的 cdn.jsdelivr.net/npm/ 路徑
+            // 修正：使用更穩定、與腳本來源一致的 cdn.jsdelivr.net/npm/ 路徑
             const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'; 
             try {
                 await Promise.all([
                     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
                     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-                    faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL) // 也可以用 SsdMobilenetv1
+                    faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL)
                 ]);
-                statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>模型加載完成。正在啟動攝影機...';
-                startVideo();
+                statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>模型加載完成。正在初始化 Firebase...';
             } catch (error) {
                 console.error("模型加載失敗：", error);
                 statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>模型加載失敗。請重新整理頁面。';
-                statusMessage.classList.remove('bg-blue-100', 'border-blue-400', 'text-blue-700');
+                statusMessage.classList.remove('bg-blue-100');
                 statusMessage.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+                throw error; // 中斷執行
             }
         }
 
-        // 2. 啟動攝影機
+        // 2. 初始化 Firebase
+        async function initFirebase() {
+            try {
+                // 獲取 Firebase 配置 (由 Canvas 環境提供)
+                const firebaseConfigJSON = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+                const firebaseConfig = JSON.parse(firebaseConfigJSON);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                
+                if (!firebaseConfig.apiKey) {
+                    statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>Firebase 設定檔遺失。';
+                    throw new Error("Firebase config not found.");
+                }
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug'); // 開啟日誌
+
+                // 登入 (由 Canvas 環境提供)
+                const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                if (authToken) {
+                    await signInWithCustomToken(auth, authToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                userId = auth.currentUser.uid;
+                if (!userId) {
+                    throw new Error("User ID not available after auth.");
+                }
+
+                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>Firebase 驗證成功。正在啟動攝影機...`;
+
+                // 設置 Firestore 路徑 (使用私有路徑)
+                const userFacesPath = `artifacts/${appId}/users/${userId}/faces`;
+                const userCheckInsPath = `artifacts/${appId}/users/${userId}/check_ins`;
+                facesCollectionRef = collection(db, userFacesPath);
+                checkInsCollectionRef = collection(db, userCheckInsPath);
+
+                // 啟動監聽器
+                listenToFaces();
+                listenToCheckIns();
+                
+                // 啟動攝影機
+                startVideo();
+
+            } catch (error) {
+                console.error("Firebase 初始化失敗：", error);
+                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>Firebase 初始化失敗。 ${error.message}`;
+                statusMessage.classList.remove('bg-blue-100');
+                statusMessage.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+            }
+        }
+        
+        // 3. 啟動攝影機
         async function startVideo() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
                 video.srcObject = stream;
                 video.addEventListener('play', () => {
-                    statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>攝影機已啟動。';
-                    statusMessage.classList.remove('bg-blue-100', 'border-blue-400', 'text-blue-700');
-                    statusMessage.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+                    statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>攝影機已啟動。等待 Firebase 資料同步...';
                     
                     // 設置 canvas 尺寸
                     const displaySize = { width: video.clientWidth, height: video.clientHeight };
@@ -129,11 +190,89 @@
             }
         }
 
-        // 3. 註冊人臉
+        // 4. (Firebase) 監聽臉部資料庫
+        function listenToFaces() {
+            onSnapshot(query(facesCollectionRef), (snapshot) => {
+                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>正在從 Firebase 同步臉部資料...`;
+                registeredFaces = [];
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    // 從儲存的陣列重建 Float32Array
+                    const descriptor = new Float32Array(data.descriptor);
+                    registeredFaces.push(new faceapi.LabeledFaceDescriptors(data.name, [descriptor]));
+                });
+
+                // 重建 FaceMatcher
+                if (registeredFaces.length > 0) {
+                    faceMatcher = new faceapi.FaceMatcher(registeredFaces, 0.6);
+                    statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>已同步 ${registeredFaces.length} 筆臉部資料。系統準備就緒。`;
+                    statusMessage.classList.remove('bg-blue-100');
+                    statusMessage.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+                } else {
+                    statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>Firebase 中尚無臉部資料。請註冊。`;
+                }
+            }, (error) => {
+                console.error("監聽臉部資料失敗:", error);
+                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>監聽臉部資料失敗。`;
+            });
+        }
+
+        // 5. (Firebase) 監聽打卡紀錄
+        function listenToCheckIns() {
+            const q = query(checkInsCollectionRef); // 拿全部資料
+            
+            onSnapshot(q, (snapshot) => {
+                logContainer.innerHTML = ''; // 清空
+                // checkInLog.clear(); // 不清除，以維持本地 session 的打卡狀態
+                
+                let docs = snapshot.docs.map(doc => doc.data());
+                
+                // 在記憶體中排序 (遵循 Firebase 最佳實踐)
+                docs.sort((a, b) => {
+                    const timeA = a.timestamp?.seconds || 0;
+                    const timeB = b.timestamp?.seconds || 0;
+                    return timeB - timeA; // 降序 (最新的在最上面)
+                });
+
+                if (docs.length === 0) {
+                    logContainer.innerHTML = '<p class="text-gray-500 text-center">尚無打卡紀錄...</p>';
+                    return;
+                }
+
+                docs.forEach((data) => {
+                    const name = data.name;
+                    const time = data.timestamp ? data.timestamp.toDate() : new Date();
+                    const timeString = time.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                    // 填充 UI
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'p-2 border-b border-gray-200';
+                    logEntry.innerHTML = `
+                        <p class="font-semibold text-indigo-700">${name}</p>
+                        <p class="text-sm text-gray-600">打卡時間：${timeString}</p>
+                    `;
+                    logContainer.appendChild(logEntry);
+                    
+                    // 填充本地 Set (簡易版，未檢查日期)
+                    checkInLog.add(name); 
+                });
+                // logContainer.scrollTop = logContainer.scrollHeight; // 改為顯示最新
+            }, (error) => {
+                console.error("監聽打卡紀錄失敗:", error);
+            });
+        }
+
+
+        // 6. 註冊人臉 (修改為寫入 Firebase)
         registerButton.addEventListener('click', async () => {
+            if (!userId) {
+                statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>Firebase 尚未準備就緒，請稍候。';
+                return;
+            }
+
             const name = nameInput.value.trim();
             if (!name) {
-                alert('請輸入姓名！');
+                statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>請輸入姓名！';
                 return;
             }
 
@@ -147,33 +286,25 @@
                                              .withFaceDescriptor();
 
                 if (!detection) {
-                    alert('未偵測到臉部，請確保光線充足並靠近鏡頭。');
                     statusMessage.innerHTML = '<strong class="font-bold">系統狀態：</strong>註冊失敗，未偵測到臉部。';
                     registerButton.disabled = false;
                     return;
                 }
 
-                // 儲存描述符
-                const descriptor = new faceapi.LabeledFaceDescriptors(name, [detection.descriptor]);
-                registeredFaces.push(descriptor);
+                // *** 修改點：儲存描述符到 Firebase ***
+                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong>偵測完畢，正在上傳 ${name} 的資料到 Firebase...`;
+                
+                const faceData = {
+                    name: name,
+                    descriptor: Array.from(detection.descriptor) // 必須轉成普通陣列才能存入 Firestore
+                };
 
-                // 更新 FaceMatcher
-                if (registeredFaces.length > 0) {
-                    faceMatcher = new faceapi.FaceMatcher(registeredFaces, 0.6); // 0.6 是辨識的閾值
-                }
+                await addDoc(facesCollectionRef, faceData);
 
-                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong> ${name} 註冊成功！`;
+                // onSnapshot 會自動處理後續 (重建 faceMatcher)
+                statusMessage.innerHTML = `<strong class="font-bold">系統狀態：</strong> ${name} 註冊成功！資料已儲存。`;
                 nameInput.value = '';
                 checkInLog.delete(name); // 允許重新打卡
-                
-                // 清空打卡紀錄中可能的 "尚無紀錄"
-                if (logContainer.innerHTML.includes('尚無打卡紀錄')) {
-                    logContainer.innerHTML = '';
-                }
-
-                logContainer.innerHTML += `<p class="text-green-600 p-2">【系統】${name} 已註冊成功。</p>`;
-                logContainer.scrollTop = logContainer.scrollHeight;
-
 
             } catch (error) {
                 console.error("註冊失敗：", error);
@@ -182,26 +313,34 @@
             registerButton.disabled = false;
         });
 
-        // 4. 即時辨識循環
+        // 7. 即時辨識循環 (修改為寫入 Firebase)
         function startRecognitionLoop() {
             setInterval(async () => {
-                if (!video.paused) {
+                // 必須等待 faceMatcher 從 Firebase 建立完成
+                if (!video.paused && faceMatcher) { 
+                    
                     const displaySize = { width: video.clientWidth, height: video.clientHeight };
+                    
+                    // --- 錯誤修復 ---
+                    // 檢查 displaySize 是否有效，防止 "invalid dimensions" 錯誤
+                    if (displaySize.width === 0 || displaySize.height === 0) {
+                        // console.warn("Video dimensions are 0, skipping detection."); // 註解掉以避免洗版
+                        return; // 如果寬高為 0，則跳過此偵測循環
+                    }
+                    // --- 結束修復 ---
+
                     faceapi.matchDimensions(canvas, displaySize);
 
-                    // 偵測所有臉部
                     const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
                                                     .withFaceLandmarks()
                                                     .withFaceDescriptors();
 
                     const resizedDetections = faceapi.resizeResults(detections, displaySize);
 
-                    // 清除畫布
                     const ctx = canvas.getContext('2d');
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                    if (faceMatcher && resizedDetections.length > 0) {
-                        // 進行比對
+                    if (resizedDetections.length > 0) {
                         const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
 
                         results.forEach((result, i) => {
@@ -209,10 +348,15 @@
                             const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString() });
                             drawBox.draw(canvas);
 
-                            // 如果辨識到且尚未打卡
+                            // *** 修改點 ***
+                            // 如果辨識到且尚未打卡 (檢查本地快取)
                             if (result.label !== 'unknown' && !checkInLog.has(result.label)) {
+                                
+                                // 立即標記到本地 Set，防止 300ms 內重複觸發
+                                checkInLog.add(result.label); 
+                                
+                                // 呼叫 logCheckIn (現在它只寫入 DB)
                                 logCheckIn(result.label);
-                                checkInLog.add(result.label); // 標記為已打卡
                             }
                         });
                     }
@@ -220,28 +364,29 @@
             }, 300); // 每 300 毫秒辨識一次
         }
 
-        // 紀錄打卡
-        function logCheckIn(name) {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            
-            // 清空打卡紀錄中可能的 "尚無紀錄"
-            if (logContainer.innerHTML.includes('尚無打卡紀錄')) {
-                logContainer.innerHTML = '';
+        // 8. 紀錄打卡 (修改為寫入 Firebase)
+        async function logCheckIn(name) {
+            try {
+                // 寫入 Firestore，使用伺服器時間
+                await addDoc(checkInsCollectionRef, {
+                    name: name,
+                    timestamp: serverTimestamp() 
+                });
+                // onSnapshot 會自動更新 UI
+            } catch (error) {
+                console.error("寫入打卡紀錄失敗:", error);
+                // 如果寫入失敗，從本地 Set 移除，允許下次重試
+                checkInLog.delete(name);
             }
-
-            const logEntry = document.createElement('div');
-            logEntry.className = 'p-2 border-b border-gray-200';
-            logEntry.innerHTML = `
-                <p class="font-semibold text-indigo-700">${name}</p>
-                <p class="text-sm text-gray-600">打卡時間：${timeString}</p>
-            `;
-            logContainer.appendChild(logEntry);
-            logContainer.scrollTop = logContainer.scrollHeight; // 自動滾動到底部
         }
 
-        // 啟動程式
-        loadModels();
+        // 9. 啟動程式 (新的啟動順序)
+        async function main() {
+            await loadModels(); // 1. 加載 face-api 模型
+            await initFirebase(); // 2. 初始化 Firebase 並啟動監聽和攝影機
+        }
+
+        main();
     </script>
 </body>
 </html>
