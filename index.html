@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>人臉打卡系統 (Firebase版)</title>
+    <title>西北人臉打卡系統</title>
     <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 載入 face-api.js -->
@@ -49,11 +49,11 @@
 
     <!-- 1. 登入視圖 (預設顯示) -->
     <div id="loginView" class="container mx-auto max-w-sm p-8 mt-20 bg-white rounded-lg shadow-lg">
-        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">人臉打卡系統</h1>
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">西北人臉打卡系統</h1>
         <div class="space-y-4">
             <div>
                 <label for="emailInput" class="block text-sm font-medium text-gray-700">電子郵件</label>
-                <input type="email" id="emailInput" placeholder="user@example.com" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500">
+                <input type="email" id="emailInput" placeholder="user@example.com" value="nwapp.eason@gmail.com" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500">
             </div>
             <div>
                 <label for="passwordInput" class="block text-sm font-medium text-gray-700">密碼</label>
@@ -280,11 +280,10 @@
                     if (user) {
                         // 使用者已登入
                         userId = user.uid;
-                        showStatus('驗證成功，正在檢查角色...', 'success');
-
-                        // 設置 Firestore 引用 (改為公有路徑)
-                        const facesPath = `artifacts/${appId}/public/faces`;
-                        const checkInsPath = `artifacts/${appId}/public/check_ins`;
+                        
+                        // 修正：Firebase 路徑 (COL/DOC/COL/DOC/COL) 必須為奇數
+                        const facesPath = `artifacts/${appId}/public/data/faces`;
+                        const checkInsPath = `artifacts/${appId}/public/data/check_ins`;
                         facesCollectionRef = collection(db, facesPath);
                         checkInsCollectionRef = collection(db, checkInsPath);
 
@@ -292,8 +291,16 @@
                         listenToFaces();
                         listenToCheckIns();
 
-                        // 檢查角色
-                        await checkUserRole(userId);
+                        // --- 角色檢查 ---
+                        // 修正：優先檢查指定的 admin email
+                        if (user.email === 'nwapp.eason@gmail.com') {
+                            showStatus('管理員 (nwapp.eason@gmail.com) 登入成功。', 'success');
+                            showView('admin');
+                        } else {
+                            // 檢查 Firestore 中的角色
+                            showStatus('驗證成功，正在檢查角色...', 'success');
+                            await checkUserRole(userId);
+                        }
 
                     } else {
                         // 使用者未登入
@@ -314,8 +321,8 @@
         // 3. 檢查使用者角色
         async function checkUserRole(uid) {
             try {
-                // 路徑修正：角色文件也應在公有路徑下
-                const roleDocRef = doc(db, `artifacts/${appId}/public/user_roles`, uid);
+                // 修正：Firebase 路徑 (COL/DOC/COL/DOC/COL/DOC)
+                const roleDocRef = doc(db, `artifacts/${appId}/public/data/user_roles`, uid);
                 const docSnap = await getDoc(roleDocRef);
 
                 if (docSnap.exists() && docSnap.data().role === 'admin') {
