@@ -16,21 +16,21 @@
             max-width: 640px; /* 最大寬度 */
             height: 480px;
         }
-        #video, #canvas, #videoAdmin, #canvasAdmin {
+        #video, #canvas, #videoAdmin, #canvasAdmin, #videoAdminCheckin, #canvasAdminCheckin {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
         }
-        #video, #videoAdmin {
+        #video, #videoAdmin, #videoAdminCheckin {
             object-fit: cover;
         }
-        #canvas, #canvasAdmin {
+        #canvas, #canvasAdmin, #canvasAdminCheckin {
             pointer-events: none; /* 讓 canvas 不會擋住下面的 video */
         }
         /* 快照畫布 */
-        #snapshotCanvas, #snapshotCanvasAdmin {
+        #snapshotCanvas, #snapshotCanvasAdmin, #snapshotCanvasAdminCheckin {
             width: 150px;
             height: 150px;
             border-radius: 0.5rem;
@@ -128,10 +128,11 @@
             <button id="logoutButtonAdmin" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600">登出</button>
         </div>
         
-        <div class="flex flex-col lg:flex-row gap-8">
+        <!-- 修正：改為 2x2 網格佈局 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             
-            <!-- 新增：管理員註冊區 -->
-            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+            <!-- 模組 1：管理員註冊區 -->
+            <div class="bg-white p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 text-center">新增/管理人員</h2>
 
                 <!-- 啟動相機按鈕 -->
@@ -164,16 +165,42 @@
                 </div>
             </div>
 
-            <!-- 左側：已註冊人臉 -->
-            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+            <!-- 新增：模組 2：管理員打卡區 -->
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">管理員打卡</h2>
+                
+                <!-- 打卡按鈕 (管理員) -->
+                <button id="adminCheckInButton" class="w-full bg-red-600 text-white font-bold py-4 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 text-lg">
+                    <span id="adminCheckInButtonText">點此開始打卡</span>
+                </button>
+
+                <!-- 影片容器 (管理員打卡) -->
+                <div id="videoContainerAdminCheckin" class="video-container mx-auto bg-gray-900 rounded-lg overflow-hidden shadow-inner my-4 hidden">
+                    <video id="videoAdminCheckin" autoplay muted playsinline></video>
+                    <canvas id="canvasAdminCheckin"></canvas>
+                </div>
+
+                <!-- 快照區 (管理員打卡) -->
+                <div id="snapshotContainerAdminCheckin" class="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border hidden mt-4">
+                    <canvas id="snapshotCanvasAdminCheckin"></canvas>
+                    <div>
+                        <p class="text-sm text-gray-500">目前偵測到：</p>
+                        <p id="snapshotNameAdminCheckin" class="text-xl font-bold text-gray-800">偵測中...</p>
+                        <p id="snapshotTimeAdminCheckin" class="text-sm text-green-600"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 模組 3：已註冊人臉 -->
+            <div class="bg-white p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 text-center">已註冊人臉列表</h2>
                 <div id="adminFacesList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
                     <p class="text-gray-500 text-center">讀取中...</p>
                 </div>
             </div>
 
-            <!-- 右側：全系統打卡紀錄 -->
-            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+            <!-- 模組 4：全系統打卡紀錄 -->
+            <div class="bg-white p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 text-center">全系統打卡紀錄</h2>
                 <div id="adminLogsList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
                     <p class="text-gray-500 text-center">讀取中...</p>
@@ -218,11 +245,10 @@
         const snapshotTime = document.getElementById('snapshotTime');
         const logoutButtonUser = document.getElementById('logoutButtonUser');
         
-        // --- DOM 元素 (管理員) ---
+        // --- DOM 元素 (管理員 - 註冊) ---
         const adminFacesList = document.getElementById('adminFacesList');
         const adminLogsList = document.getElementById('adminLogsList');
         const logoutButtonAdmin = document.getElementById('logoutButtonAdmin');
-        // 管理員註冊區
         const startAdminCamButton = document.getElementById('startAdminCamButton');
         const adminCamButtonText = document.getElementById('adminCamButtonText');
         const videoContainerAdmin = document.getElementById('videoContainerAdmin');
@@ -235,6 +261,17 @@
         const nameInputAdmin = document.getElementById('nameInputAdmin');
         const registerButtonAdmin = document.getElementById('registerButtonAdmin');
 
+        // --- DOM 元素 (管理員 - 打卡) ---
+        const adminCheckInButton = document.getElementById('adminCheckInButton');
+        const adminCheckInButtonText = document.getElementById('adminCheckInButtonText');
+        const videoContainerAdminCheckin = document.getElementById('videoContainerAdminCheckin');
+        const videoAdminCheckin = document.getElementById('videoAdminCheckin');
+        const canvasAdminCheckin = document.getElementById('canvasAdminCheckin');
+        const snapshotContainerAdminCheckin = document.getElementById('snapshotContainerAdminCheckin');
+        const snapshotCanvasAdminCheckin = document.getElementById('snapshotCanvasAdminCheckin');
+        const snapshotNameAdminCheckin = document.getElementById('snapshotNameAdminCheckin');
+        const snapshotTimeAdminCheckin = document.getElementById('snapshotTimeAdminCheckin');
+
 
         // --- 全局變數 ---
         let db, auth, userId, appId;
@@ -242,8 +279,8 @@
         let checkInLog = new Set(); // 本地快取 (防止重複打卡)
         let faceMatcher;
         let facesCollectionRef, checkInsCollectionRef; // Firestore 引用
-        let dateTimeInterval, recognitionInterval, adminRecognitionInterval; // 計時器
-        let localStream, adminStream; // 攝影機串流
+        let dateTimeInterval, recognitionInterval, adminRecognitionInterval, adminCheckinRecognitionInterval; // 計時器
+        let localStream, adminStream, adminCheckinStream; // 攝影機串流
 
         // --- 顯示狀態訊息 ---
         function showStatus(message, type = 'info') {
@@ -356,8 +393,10 @@
                         if (dateTimeInterval) clearInterval(dateTimeInterval);
                         if (recognitionInterval) clearInterval(recognitionInterval);
                         if (adminRecognitionInterval) clearInterval(adminRecognitionInterval);
+                        if (adminCheckinRecognitionInterval) clearInterval(adminCheckinRecognitionInterval);
                         stopVideo();
                         stopVideoAdmin(); // 登出時也關閉管理員相機
+                        stopVideoAdminCheckin(); // 登出時關閉管理員打卡相機
                         showView('login');
                     }
                 });
@@ -408,6 +447,8 @@
             // 綁定管理員註冊按鈕
             startAdminCamButton.onclick = onStartAdminCamButtonClick;
             registerButtonAdmin.onclick = onRegisterClickAdmin;
+            // 綁定管理員打卡按鈕
+            adminCheckInButton.onclick = onAdminCheckInButtonClick;
         }
 
         // 5. 即時日期時間
@@ -630,7 +671,7 @@
             }
         }
 
-        // 10-Admin. 啟動相機按鈕 (管理員)
+        // 10-Admin. 啟動相機按鈕 (管理員 - 註冊)
         function onStartAdminCamButtonClick() {
             if (adminStream) {
                 // 正在註冊 -> 停止
@@ -651,6 +692,27 @@
                 adminCamButtonText.textContent = '關閉相機';
                 startAdminCamButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
                 startAdminCamButton.classList.add('bg-gray-600', 'hover:bg-gray-700');
+            }
+        }
+        
+        // 10-Admin-Checkin. 打卡按鈕控制 (管理員 - 打卡)
+        function onAdminCheckInButtonClick() {
+            if (adminCheckinStream) {
+                // 正在打卡 -> 停止
+                stopVideoAdminCheckin();
+                videoContainerAdminCheckin.classList.add('hidden');
+                snapshotContainerAdminCheckin.classList.add('hidden');
+                adminCheckInButtonText.textContent = '點此開始打卡';
+                adminCheckInButton.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                adminCheckInButton.classList.add('bg-red-600', 'hover:bg-red-700');
+            } else {
+                // 停止 -> 開始打卡
+                startVideoAdminCheckin();
+                videoContainerAdminCheckin.classList.remove('hidden');
+                snapshotContainerAdminCheckin.classList.remove('hidden');
+                adminCheckInButtonText.textContent = '停止辨識';
+                adminCheckInButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                adminCheckInButton.classList.add('bg-gray-600', 'hover:bg-gray-700');
             }
         }
 
@@ -688,7 +750,7 @@
             }
         }
 
-        // 11-Admin. 啟動/停止攝影機 (管理員)
+        // 11-Admin. 啟動/停止攝影機 (管理員 - 註冊)
         async function startVideoAdmin() {
             if (adminStream) return;
             try {
@@ -717,6 +779,39 @@
                 const sCtx = snapshotCanvasAdmin.getContext('2d');
                 sCtx.clearRect(0, 0, snapshotCanvasAdmin.width, snapshotCanvasAdmin.height);
                 snapshotNameAdmin.textContent = '...';
+            }
+        }
+
+        // 11-Admin-Checkin. 啟動/停止攝影機 (管理員 - 打卡)
+        async function startVideoAdminCheckin() {
+            if (adminCheckinStream) return;
+            try {
+                adminCheckinStream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                videoAdminCheckin.srcObject = adminCheckinStream;
+                videoAdminCheckin.addEventListener('play', () => {
+                    const displaySize = { width: videoAdminCheckin.clientWidth, height: videoAdminCheckin.clientHeight };
+                    faceapi.matchDimensions(canvasAdminCheckin, displaySize);
+                    
+                    if (adminCheckinRecognitionInterval) clearInterval(adminCheckinRecognitionInterval);
+                    adminCheckinRecognitionInterval = setInterval(runRecognitionAdminCheckin, 500); 
+                });
+            } catch (err) {
+                console.error("無法存取攝影機 (管理員打卡)：", err);
+                showStatus('無法存取攝影機。請檢查權限設定。', 'error');
+                adminCheckinStream = null;
+            }
+        }
+
+        function stopVideoAdminCheckin() {
+            if (adminCheckinStream) {
+                adminCheckinStream.getTracks().forEach(track => track.stop());
+                adminCheckinStream = null;
+                videoAdminCheckin.srcObject = null;
+                if (adminCheckinRecognitionInterval) clearInterval(adminCheckinRecognitionInterval);
+                const sCtx = snapshotCanvasAdminCheckin.getContext('2d');
+                sCtx.clearRect(0, 0, snapshotCanvasAdminCheckin.width, snapshotCanvasAdminCheckin.height);
+                snapshotNameAdminCheckin.textContent = '...';
+                snapshotTimeAdminCheckin.textContent = '';
             }
         }
 
@@ -775,7 +870,7 @@
             }
         }
 
-        // 12-Admin. 即時辨識循環 (管理員)
+        // 12-Admin. 即時辨識循環 (管理員 - 註冊)
         async function runRecognitionAdmin() {
             if (!videoAdmin.paused && faceMatcher && adminStream) { 
                 const displaySize = { width: videoAdmin.clientWidth, height: videoAdmin.clientHeight };
@@ -810,6 +905,60 @@
                     }
                 } else {
                     snapshotNameAdmin.textContent = '未偵測到人臉';
+                }
+            }
+        }
+
+        // 12-Admin-Checkin. 即時辨識循環 (管理員 - 打卡)
+        async function runRecognitionAdminCheckin() {
+            if (!videoAdminCheckin.paused && faceMatcher && adminCheckinStream) { 
+                const displaySize = { width: videoAdminCheckin.clientWidth, height: videoAdminCheckin.clientHeight };
+                if (displaySize.width === 0 || displaySize.height === 0) return; 
+
+                faceapi.matchDimensions(canvasAdminCheckin, displaySize);
+
+                const detections = await faceapi.detectAllFaces(videoAdminCheckin, new faceapi.TinyFaceDetectorOptions())
+                                                .withFaceLandmarks()
+                                                .withFaceDescriptors();
+
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const ctx = canvasAdminCheckin.getContext('2d');
+                ctx.clearRect(0, 0, canvasAdminCheckin.width, canvasAdminCheckin.height);
+                
+                const sCtx = snapshotCanvasAdminCheckin.getContext('2d');
+                sCtx.clearRect(0, 0, snapshotCanvasAdminCheckin.width, snapshotCanvasAdminCheckin.height);
+
+                if (resizedDetections.length > 0) {
+                    const d = resizedDetections[0]; // 只處理第一張臉
+                    const result = faceMatcher.findBestMatch(d.descriptor);
+                    
+                    const box = d.detection.box;
+                    const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: 'red' });
+                    drawBox.draw(canvasAdminCheckin);
+                    sCtx.drawImage(videoAdminCheckin, box.x, box.y, box.width, box.height, 0, 0, snapshotCanvasAdminCheckin.width, snapshotCanvasAdminCheckin.height);
+
+                    if (result.label !== 'unknown') {
+                        snapshotNameAdminCheckin.textContent = result.label;
+                        
+                        if (!checkInLog.has(result.label)) {
+                            snapshotTimeAdminCheckin.textContent = `打卡成功 @ ${new Date().toLocaleTimeString()}`;
+                            snapshotTimeAdminCheckin.classList.remove('text-yellow-600');
+                            snapshotTimeAdminCheckin.classList.add('text-green-600');
+                            
+                            logCheckIn(result.label); 
+                            checkInLog.add(result.label); 
+                        } else {
+                            snapshotTimeAdminCheckin.textContent = '今日已打卡';
+                            snapshotTimeAdminCheckin.classList.remove('text-green-600');
+                            snapshotTimeAdminCheckin.classList.add('text-yellow-600');
+                        }
+                    } else {
+                        snapshotNameAdminCheckin.textContent = '陌生人';
+                        snapshotTimeAdminCheckin.textContent = '';
+                    }
+                } else {
+                    snapshotNameAdminCheckin.textContent = '未偵測到人臉';
+                    snapshotTimeAdminCheckin.textContent = '';
                 }
             }
         }
