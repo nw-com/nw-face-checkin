@@ -71,7 +71,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, addDoc, onSnapshot, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { initializeFirestore, collection, addDoc, onSnapshot, query, setLogLevel, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const ADMIN_EMAIL = 'nwapp.eason@gmail.com';
 
@@ -134,7 +134,8 @@
       };
       appId = firebaseConfig.projectId || 'nw-face-checkin';
       const app = initializeApp(firebaseConfig);
-      db = getFirestore(app);
+      // 修正 WebChannel 400：強制長輪詢避免被代理/網路阻擋
+      db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
       auth = getAuth(app);
       setLogLevel('Debug');
 
@@ -149,6 +150,7 @@
           }
           facesCollectionRef = collection(db, `artifacts/${appId}/public/data/faces`);
           listenToFaces();
+          loadInitialFaces();
           showAdminView();
         } else {
           userId = null;
@@ -180,7 +182,17 @@
         registeredFacesList.innerHTML = docs.map(d => `<div class="p-2 border-b border-gray-200"><p class="font-semibold">${d.name}</p></div>`).join('') || '<p class="text-gray-500 text-center">尚無資料</p>';
         const labeled = docs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
         faceMatcher = labeled.length > 0 ? new faceapi.FaceMatcher(labeled, 0.6) : undefined;
-      }, (e) => console.error('faces 監聽失敗', e));
+      }, (e) => { console.error('faces 監聽失敗', e); showStatus('faces 監聽失敗，將改為一次性載入', 'error'); });
+    }
+
+    async function loadInitialFaces() {
+      try {
+        const snap = await getDocs(query(facesCollectionRef));
+        const docs = snap.docs.map(d => d.data());
+        registeredFacesList.innerHTML = docs.map(d => `<div class="p-2 border-b border-gray-200"><p class="font-semibold">${d.name}</p></div>`).join('') || '<p class="text-gray-500 text-center">尚無資料</p>';
+        const labeled = docs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
+        faceMatcher = labeled.length > 0 ? new faceapi.FaceMatcher(labeled, 0.6) : undefined;
+      } catch (e) { console.error('faces 初始載入失敗', e); }
     }
 
     function onToggleCameraAdmin() {
@@ -238,8 +250,14 @@
                                       .withFaceDescriptors();
       if (detections.length === 0) { showStatus('沒有偵測到人臉', 'error'); return; }
       const descriptor = Array.from(detections[0].descriptor);
-      try { await addDoc(facesCollectionRef, { name, descriptor }); showStatus(`已註冊：${name}`, 'success'); }
-      catch (e) { console.error('註冊失敗', e); showStatus('註冊失敗', 'error'); }
+      try {
+        const docRef = await addDoc(facesCollectionRef, { name, descriptor });
+        showStatus(`已註冊：${name} (id: ${docRef.id})`, 'success');
+      }
+      catch (e) {
+        console.error('註冊失敗', e);
+        showStatus(`註冊失敗：${e?.message || '未知錯誤'}`, 'error');
+      }
     }
 
     async function main() {

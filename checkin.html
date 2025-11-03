@@ -80,7 +80,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { initializeFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, setLogLevel, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const statusMessage = document.getElementById('statusMessage');
     const loginView = document.getElementById('loginView');
@@ -165,7 +165,8 @@
       };
       appId = firebaseConfig.projectId || 'nw-face-checkin';
       const app = initializeApp(firebaseConfig);
-      db = getFirestore(app);
+      // 修正部分網路環境下 WebChannel 400/ERR_ABORTED：強制使用長輪詢
+      db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
       auth = getAuth(app);
       setLogLevel('Debug');
 
@@ -175,6 +176,8 @@
           facesCollectionRef = collection(db, `artifacts/${appId}/public/data/faces`);
           checkInsCollectionRef = collection(db, `artifacts/${appId}/public/data/check_ins`);
           listenToFaces();
+          // 初始資料載入一次，避免持續監聽失敗時畫面空白
+          loadInitialFaces();
           listenToCheckIns();
           showUserView();
         } else {
@@ -216,7 +219,23 @@
         });
         faceMatcher = registeredFaces.length > 0 ? new faceapi.FaceMatcher(registeredFaces, 0.6) : undefined;
         showStatus(`已同步臉部資料 ${registeredFaces.length} 筆`, 'success');
-      }, (e) => console.error('臉部資料監聽失敗', e));
+      }, (e) => { console.error('臉部資料監聽失敗', e); showStatus('臉部資料監聽失敗，改為一次性載入', 'error'); });
+    }
+
+    async function loadInitialFaces() {
+      try {
+        const snap = await getDocs(query(facesCollectionRef));
+        registeredFaces = [];
+        snap.forEach((doc) => {
+          const data = doc.data();
+          const descriptor = new Float32Array(data.descriptor);
+          registeredFaces.push(new faceapi.LabeledFaceDescriptors(data.name, [descriptor]));
+        });
+        faceMatcher = registeredFaces.length > 0 ? new faceapi.FaceMatcher(registeredFaces, 0.6) : undefined;
+        showStatus(`初始臉部資料 ${registeredFaces.length} 筆`, 'success');
+      } catch (e) {
+        console.error('初始臉部資料載入失敗', e);
+      }
     }
 
     function listenToCheckIns() {
