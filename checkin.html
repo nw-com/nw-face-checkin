@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>西北人臉打卡系統 - 打卡頁面</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    .video-container { position: relative; width: 100%; max-width: 640px; height: 480px; }
+    #video, #canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    #video { object-fit: cover; }
+    #canvas { pointer-events: none; }
+    #snapshotCanvas { width: 150px; height: 150px; border-radius: 0.5rem; border: 2px solid #E5E7EB; background-color: #374151; }
+  </style>
+  <link rel="preconnect" href="https://www.gstatic.com">
+</head>
+<body class="bg-gray-100 font-sans">
+  <div id="statusMessage" class="hidden bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative m-4" role="alert"></div>
+
+  <!-- 登入區 -->
+  <div id="loginView" class="container mx-auto max-w-sm p-8 mt-10 bg-white rounded-lg shadow-lg">
+    <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">打卡頁面</h1>
+    <div class="space-y-4">
+      <div>
+        <label for="emailInput" class="block text-sm font-medium text-gray-700">電子郵件</label>
+        <input type="email" id="emailInput" value="nwapp.eason@gmail.com" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+      </div>
+      <div>
+        <label for="passwordInput" class="block text-sm font-medium text-gray-700">密碼</label>
+        <input type="password" id="passwordInput" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+      </div>
+      <button id="loginButton" class="w-full bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700">登入</button>
+      <p id="loginError" class="text-sm text-red-600 text-center"></p>
+    </div>
+  </div>
+
+  <!-- 打卡區 -->
+  <div id="userView" class="container mx-auto max-w-4xl p-8 hidden">
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-bold text-gray-800">使用者打卡</h2>
+      <button id="logoutButtonUser" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600">登出</button>
+    </div>
+
+    <div class="flex flex-col lg:flex-row gap-8">
+      <!-- 左：打卡與影像 -->
+      <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+        <h3 class="text-lg font-semibold mb-4 text-center">打卡上班</h3>
+        <button id="checkInButton" class="w-full bg-red-600 text-white font-bold py-4 px-4 rounded-md hover:bg-red-700 text-lg">
+          <span id="date-display">...</span>
+          <span id="time-display" class="block text-2xl font-mono">...</span>
+          <span id="checkInButtonText">點此開始打卡</span>
+        </button>
+
+        <div id="videoContainer" class="video-container mx-auto bg-gray-900 rounded-lg overflow-hidden shadow-inner my-4 hidden">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="canvas"></canvas>
+        </div>
+
+        <div id="snapshotContainer" class="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border hidden mt-4">
+          <canvas id="snapshotCanvas"></canvas>
+          <div>
+            <p class="text-sm text-gray-500">目前偵測到：</p>
+            <p id="snapshotName" class="text-xl font-bold text-gray-800">偵測中...</p>
+            <p id="snapshotTime" class="text-sm text-green-600"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：打卡紀錄 -->
+      <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+        <h3 class="text-lg font-semibold mb-4 text-center">打卡紀錄 (雲端)</h3>
+        <div id="userLogsList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
+          <p class="text-gray-500 text-center">正在連接 Firebase...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const statusMessage = document.getElementById('statusMessage');
+    const loginView = document.getElementById('loginView');
+    const userView = document.getElementById('userView');
+    const emailInput = document.getElementById('emailInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const loginButton = document.getElementById('loginButton');
+    const loginError = document.getElementById('loginError');
+    const logoutButtonUser = document.getElementById('logoutButtonUser');
+
+    // 打卡 DOM
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const snapshotCanvas = document.getElementById('snapshotCanvas');
+    const snapshotName = document.getElementById('snapshotName');
+    const snapshotTime = document.getElementById('snapshotTime');
+    const userLogsList = document.getElementById('userLogsList');
+    const checkInButton = document.getElementById('checkInButton');
+    const dateDisplay = document.getElementById('date-display');
+    const timeDisplay = document.getElementById('time-display');
+    const checkInButtonText = document.getElementById('checkInButtonText');
+    const videoContainer = document.getElementById('videoContainer');
+    const snapshotContainer = document.getElementById('snapshotContainer');
+
+    let db, auth, userId, appId;
+    let registeredFaces = [];
+    let checkInLog = new Set();
+    let faceMatcher;
+    let facesCollectionRef, checkInsCollectionRef;
+    let dateTimeInterval, recognitionInterval;
+    let localStream;
+
+    function showStatus(message, type = 'info') {
+      statusMessage.textContent = message;
+      statusMessage.classList.remove('hidden', 'bg-blue-100', 'bg-red-100', 'bg-green-100');
+      if (type === 'error') {
+        statusMessage.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+      } else if (type === 'success') {
+        statusMessage.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+      } else {
+        statusMessage.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+      }
+    }
+
+    function showUserView() {
+      loginView.classList.add('hidden');
+      userView.classList.remove('hidden');
+      if (dateTimeInterval) clearInterval(dateTimeInterval);
+      dateTimeInterval = setInterval(updateDateTime, 1000);
+      updateDateTime();
+      checkInButton.onclick = onCheckInButtonClick;
+      logoutButtonUser.onclick = handleLogout;
+    }
+
+    async function loadModels() {
+      showStatus('正在加載臉部模型...');
+      const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+      try {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL)
+        ]);
+        showStatus('模型加載完成', 'success');
+      } catch (e) {
+        console.error(e);
+        showStatus('模型加載失敗', 'error');
+        throw e;
+      }
+    }
+
+    async function initFirebase() {
+      const firebaseConfig = {
+        apiKey: "AIzaSyCyTFIQn-gTHX8ipQ-oekus_d3Sg1kiHNY",
+        authDomain: "nw-face-checkin.firebaseapp.com",
+        projectId: "nw-face-checkin",
+        storageBucket: "nw-face-checkin.firebasestorage.app",
+        messagingSenderId: "187703864109",
+        appId: "1:187703864109:web:675ba96fe40c111512c1a4",
+        measurementId: "G-NRDLBL3NJP"
+      };
+      appId = firebaseConfig.projectId || 'nw-face-checkin';
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      setLogLevel('Debug');
+
+      onAuthStateChanged(auth, async (user) => {
+        if (user) {
+          userId = user.uid;
+          facesCollectionRef = collection(db, `artifacts/${appId}/public/data/faces`);
+          checkInsCollectionRef = collection(db, `artifacts/${appId}/public/data/check_ins`);
+          listenToFaces();
+          listenToCheckIns();
+          showUserView();
+        } else {
+          userId = null;
+          stopVideo();
+          loginView.classList.remove('hidden');
+          userView.classList.add('hidden');
+        }
+      });
+    }
+
+    function updateDateTime() {
+      const now = new Date();
+      dateDisplay.textContent = now.toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+      timeDisplay.textContent = now.toLocaleTimeString('zh-TW', { hour12: false });
+    }
+
+    async function handleLogin() {
+      loginError.textContent = '';
+      loginButton.disabled = true;
+      try {
+        await signInWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+      } catch (error) {
+        console.error('登入失敗', error);
+        loginError.textContent = '登入失敗，請確認帳密';
+        loginButton.disabled = false;
+      }
+    }
+
+    async function handleLogout() { await signOut(auth); }
+
+    function listenToFaces() {
+      onSnapshot(query(facesCollectionRef), (snapshot) => {
+        registeredFaces = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          const descriptor = new Float32Array(data.descriptor);
+          registeredFaces.push(new faceapi.LabeledFaceDescriptors(data.name, [descriptor]));
+        });
+        faceMatcher = registeredFaces.length > 0 ? new faceapi.FaceMatcher(registeredFaces, 0.6) : undefined;
+        showStatus(`已同步臉部資料 ${registeredFaces.length} 筆`, 'success');
+      }, (e) => console.error('臉部資料監聽失敗', e));
+    }
+
+    function listenToCheckIns() {
+      onSnapshot(query(checkInsCollectionRef), (snapshot) => {
+        let docs = snapshot.docs.map(doc => doc.data());
+        docs.sort((a,b) => (b.timestamp?.seconds||0) - (a.timestamp?.seconds||0));
+        if (docs.length === 0) {
+          userLogsList.innerHTML = '<p class="text-gray-500 text-center">尚無打卡紀錄...</p>';
+          return;
+        }
+        userLogsList.innerHTML = docs.map(d => {
+          const t = d.timestamp ? d.timestamp.toDate() : new Date();
+          return `<div class="p-2 border-b border-gray-200"><p class="font-semibold text-red-700">${d.name}</p><p class="text-sm text-gray-600">打卡時間：${t.toLocaleString('zh-TW',{hour12:false})}</p></div>`;
+        }).join('');
+      }, (e) => console.error('打卡紀錄監聽失敗', e));
+    }
+
+    function onCheckInButtonClick() {
+      if (localStream) {
+        stopVideo();
+        videoContainer.classList.add('hidden');
+        snapshotContainer.classList.add('hidden');
+        checkInButtonText.textContent = '點此開始打卡';
+        checkInButton.classList.remove('bg-gray-600');
+        checkInButton.classList.add('bg-red-600');
+      } else {
+        startVideo();
+        videoContainer.classList.remove('hidden');
+        snapshotContainer.classList.remove('hidden');
+        checkInButtonText.textContent = '停止辨識';
+        checkInButton.classList.remove('bg-red-600');
+        checkInButton.classList.add('bg-gray-600');
+      }
+    }
+
+    async function startVideo() {
+      if (localStream) return;
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: {} });
+        video.srcObject = localStream;
+        video.addEventListener('play', () => {
+          const displaySize = { width: video.clientWidth, height: video.clientHeight };
+          faceapi.matchDimensions(canvas, displaySize);
+          if (recognitionInterval) clearInterval(recognitionInterval);
+          recognitionInterval = setInterval(runRecognition, 500);
+        });
+      } catch (err) {
+        console.error('攝影機錯誤', err);
+        showStatus('無法存取攝影機，請檢查權限', 'error');
+        localStream = null;
+      }
+    }
+
+    function stopVideo() {
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+        video.srcObject = null;
+        if (recognitionInterval) clearInterval(recognitionInterval);
+        const sCtx = snapshotCanvas.getContext('2d');
+        sCtx.clearRect(0, 0, snapshotCanvas.width, snapshotCanvas.height);
+        snapshotName.textContent = '...';
+        snapshotTime.textContent = '';
+      }
+    }
+
+    async function runRecognition() {
+      if (!video.paused && faceMatcher && localStream) {
+        const displaySize = { width: video.clientWidth, height: video.clientHeight };
+        if (displaySize.width === 0 || displaySize.height === 0) return;
+        faceapi.matchDimensions(canvas, displaySize);
+        const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                                        .withFaceLandmarks()
+                                        .withFaceDescriptors();
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const sCtx = snapshotCanvas.getContext('2d');
+        sCtx.clearRect(0, 0, snapshotCanvas.width, snapshotCanvas.height);
+
+        if (resizedDetections.length > 0) {
+          const d = resizedDetections[0];
+          const result = faceMatcher.findBestMatch(d.descriptor);
+          const box = d.detection.box;
+          new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: 'red' }).draw(canvas);
+          sCtx.drawImage(video, box.x, box.y, box.width, box.height, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+          if (result.label !== 'unknown') {
+            snapshotName.textContent = result.label;
+            if (!checkInLog.has(result.label)) {
+              snapshotTime.textContent = `打卡成功 @ ${new Date().toLocaleTimeString('zh-TW',{hour12:false})}`;
+              snapshotTime.classList.remove('text-yellow-600');
+              snapshotTime.classList.add('text-green-600');
+              logCheckIn(result.label);
+              checkInLog.add(result.label);
+            } else {
+              snapshotTime.textContent = '今日已打卡';
+              snapshotTime.classList.remove('text-green-600');
+              snapshotTime.classList.add('text-yellow-600');
+            }
+          } else {
+            snapshotName.textContent = '陌生人';
+            snapshotTime.textContent = '';
+          }
+        } else {
+          snapshotName.textContent = '未偵測到人臉';
+          snapshotTime.textContent = '';
+        }
+      }
+    }
+
+    async function logCheckIn(name) {
+      try {
+        await addDoc(checkInsCollectionRef, { name, timestamp: serverTimestamp() });
+      } catch (e) {
+        console.error('寫入打卡紀錄失敗', e);
+        checkInLog.delete(name);
+      }
+    }
+
+    async function main() {
+      await loadModels();
+      await initFirebase();
+      loginButton.onclick = handleLogin;
+    }
+
+    main();
+  </script>
+</body>
+</html>

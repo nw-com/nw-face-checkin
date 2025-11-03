@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>西北人臉打卡系統 - 註冊頁面</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    .video-container { position: relative; width: 100%; max-width: 640px; height: 480px; }
+    #videoAdmin, #canvasAdmin { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    #videoAdmin { object-fit: cover; }
+    #canvasAdmin { pointer-events: none; }
+  </style>
+  <link rel="preconnect" href="https://www.gstatic.com">
+</head>
+<body class="bg-gray-100 font-sans">
+  <div id="statusMessage" class="hidden bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative m-4" role="alert"></div>
+
+  <!-- 登入區 -->
+  <div id="loginView" class="container mx-auto max-w-sm p-8 mt-10 bg-white rounded-lg shadow-lg">
+    <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">註冊頁面</h1>
+    <div class="space-y-4">
+      <div>
+        <label for="emailInput" class="block text-sm font-medium text-gray-700">電子郵件</label>
+        <input type="email" id="emailInput" value="nwapp.eason@gmail.com" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+      </div>
+      <div>
+        <label for="passwordInput" class="block text-sm font-medium text-gray-700">密碼</label>
+        <input type="password" id="passwordInput" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm">
+      </div>
+      <button id="loginButton" class="w-full bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700">登入</button>
+      <p id="loginError" class="text-sm text-red-600 text-center"></p>
+    </div>
+  </div>
+
+  <!-- 管理員註冊區 -->
+  <div id="adminView" class="container mx-auto max-w-5xl p-8 hidden">
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-bold text-gray-800">管理員 - 註冊人臉</h2>
+      <button id="logoutButtonAdmin" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600">登出</button>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <!-- 左：攝影機與註冊 -->
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+        <div class="flex items-end gap-4 mb-4">
+          <div class="flex-1">
+            <label for="nameInputAdmin" class="block text-sm font-medium text-gray-700">姓名</label>
+            <input id="nameInputAdmin" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm" placeholder="例如：王小明">
+          </div>
+          <button id="toggleCameraAdmin" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700">啟動攝影機</button>
+          <button id="registerButtonAdmin" class="bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700">註冊</button>
+        </div>
+        <div id="videoContainerAdmin" class="video-container mx-auto bg-gray-900 rounded-lg overflow-hidden shadow-inner hidden">
+          <video id="videoAdmin" autoplay muted playsinline></video>
+          <canvas id="canvasAdmin"></canvas>
+        </div>
+      </div>
+
+      <!-- 右：已註冊清單 -->
+      <div class="bg-white p-6 rounded-lg shadow-lg">
+        <h3 class="text-lg font-semibold mb-4 text-center">已註冊人臉清單</h3>
+        <div id="registeredFacesList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
+          <p class="text-gray-500 text-center">正在連接 Firebase...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const ADMIN_EMAIL = 'nwapp.eason@gmail.com';
+
+    const statusMessage = document.getElementById('statusMessage');
+    const loginView = document.getElementById('loginView');
+    const adminView = document.getElementById('adminView');
+    const emailInput = document.getElementById('emailInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const loginButton = document.getElementById('loginButton');
+    const loginError = document.getElementById('loginError');
+    const logoutButtonAdmin = document.getElementById('logoutButtonAdmin');
+
+    const videoAdmin = document.getElementById('videoAdmin');
+    const canvasAdmin = document.getElementById('canvasAdmin');
+    const videoContainerAdmin = document.getElementById('videoContainerAdmin');
+    const toggleCameraAdmin = document.getElementById('toggleCameraAdmin');
+    const registerButtonAdmin = document.getElementById('registerButtonAdmin');
+    const nameInputAdmin = document.getElementById('nameInputAdmin');
+    const registeredFacesList = document.getElementById('registeredFacesList');
+
+    let db, auth, appId, userId;
+    let facesCollectionRef;
+    let faceMatcher;
+    let localStreamAdmin;
+    let recognitionIntervalAdmin;
+
+    function showStatus(message, type = 'info') {
+      statusMessage.textContent = message;
+      statusMessage.classList.remove('hidden', 'bg-blue-100', 'bg-red-100', 'bg-green-100');
+      if (type === 'error') {
+        statusMessage.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+      } else if (type === 'success') {
+        statusMessage.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+      } else {
+        statusMessage.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+      }
+    }
+
+    async function loadModels() {
+      showStatus('正在加載臉部模型...');
+      const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL)
+      ]);
+      showStatus('模型加載完成', 'success');
+    }
+
+    async function initFirebase() {
+      const firebaseConfig = {
+        apiKey: "AIzaSyCyTFIQn-gTHX8ipQ-oekus_d3Sg1kiHNY",
+        authDomain: "nw-face-checkin.firebaseapp.com",
+        projectId: "nw-face-checkin",
+        storageBucket: "nw-face-checkin.firebasestorage.app",
+        messagingSenderId: "187703864109",
+        appId: "1:187703864109:web:675ba96fe40c111512c1a4",
+        measurementId: "G-NRDLBL3NJP"
+      };
+      appId = firebaseConfig.projectId || 'nw-face-checkin';
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      setLogLevel('Debug');
+
+      onAuthStateChanged(auth, async (user) => {
+        if (user) {
+          userId = user.uid;
+          const isAdmin = (user.email === ADMIN_EMAIL);
+          if (!isAdmin) {
+            showStatus('此頁面僅限管理員使用', 'error');
+            await signOut(auth);
+            return;
+          }
+          facesCollectionRef = collection(db, `artifacts/${appId}/public/data/faces`);
+          listenToFaces();
+          showAdminView();
+        } else {
+          userId = null;
+          stopVideoAdmin();
+          loginView.classList.remove('hidden');
+          adminView.classList.add('hidden');
+        }
+      });
+    }
+
+    function showAdminView() {
+      loginView.classList.add('hidden');
+      adminView.classList.remove('hidden');
+      toggleCameraAdmin.onclick = onToggleCameraAdmin;
+      registerButtonAdmin.onclick = onRegisterClickAdmin;
+      logoutButtonAdmin.onclick = () => signOut(auth);
+    }
+
+    async function handleLogin() {
+      loginError.textContent = '';
+      loginButton.disabled = true;
+      try { await signInWithEmailAndPassword(auth, emailInput.value, passwordInput.value); }
+      catch (e) { console.error(e); loginError.textContent = '登入失敗，請確認帳密'; loginButton.disabled = false; }
+    }
+
+    function listenToFaces() {
+      onSnapshot(query(facesCollectionRef), (snapshot) => {
+        const docs = snapshot.docs.map(d => d.data());
+        registeredFacesList.innerHTML = docs.map(d => `<div class="p-2 border-b border-gray-200"><p class="font-semibold">${d.name}</p></div>`).join('') || '<p class="text-gray-500 text-center">尚無資料</p>';
+        const labeled = docs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
+        faceMatcher = labeled.length > 0 ? new faceapi.FaceMatcher(labeled, 0.6) : undefined;
+      }, (e) => console.error('faces 監聽失敗', e));
+    }
+
+    function onToggleCameraAdmin() {
+      if (localStreamAdmin) { stopVideoAdmin(); toggleCameraAdmin.textContent = '啟動攝影機'; }
+      else { startVideoAdmin(); toggleCameraAdmin.textContent = '停止攝影機'; }
+    }
+
+    async function startVideoAdmin() {
+      if (localStreamAdmin) return;
+      try {
+        localStreamAdmin = await navigator.mediaDevices.getUserMedia({ video: {} });
+        videoAdmin.srcObject = localStreamAdmin;
+        videoContainerAdmin.classList.remove('hidden');
+        videoAdmin.addEventListener('play', () => {
+          const displaySize = { width: videoAdmin.clientWidth, height: videoAdmin.clientHeight };
+          faceapi.matchDimensions(canvasAdmin, displaySize);
+          if (recognitionIntervalAdmin) clearInterval(recognitionIntervalAdmin);
+          recognitionIntervalAdmin = setInterval(runRecognitionAdmin, 500);
+        });
+      } catch (e) {
+        console.error('攝影機錯誤', e); showStatus('無法存取攝影機，請檢查權限', 'error'); localStreamAdmin = null;
+      }
+    }
+
+    function stopVideoAdmin() {
+      if (localStreamAdmin) { localStreamAdmin.getTracks().forEach(t => t.stop()); localStreamAdmin = null; }
+      videoAdmin.srcObject = null; videoContainerAdmin.classList.add('hidden');
+      if (recognitionIntervalAdmin) clearInterval(recognitionIntervalAdmin);
+    }
+
+    async function runRecognitionAdmin() {
+      if (!videoAdmin.paused && localStreamAdmin) {
+        const displaySize = { width: videoAdmin.clientWidth, height: videoAdmin.clientHeight };
+        if (displaySize.width === 0 || displaySize.height === 0) return;
+        faceapi.matchDimensions(canvasAdmin, displaySize);
+        const detections = await faceapi.detectAllFaces(videoAdmin, new faceapi.TinyFaceDetectorOptions())
+                                        .withFaceLandmarks()
+                                        .withFaceDescriptors();
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+        const ctx = canvasAdmin.getContext('2d');
+        ctx.clearRect(0, 0, canvasAdmin.width, canvasAdmin.height);
+        resizedDetections.forEach(d => {
+          const result = faceMatcher ? faceMatcher.findBestMatch(d.descriptor) : { toString: ()=>'unknown', label:'unknown' };
+          new faceapi.draw.DrawBox(d.detection.box, { label: result.toString(), boxColor: 'red' }).draw(canvasAdmin);
+        });
+      }
+    }
+
+    async function onRegisterClickAdmin() {
+      const name = nameInputAdmin.value.trim();
+      if (!name) { showStatus('請輸入姓名', 'error'); return; }
+      if (!localStreamAdmin) { showStatus('請先啟動攝影機', 'error'); return; }
+      const detections = await faceapi.detectAllFaces(videoAdmin, new faceapi.TinyFaceDetectorOptions())
+                                      .withFaceLandmarks()
+                                      .withFaceDescriptors();
+      if (detections.length === 0) { showStatus('沒有偵測到人臉', 'error'); return; }
+      const descriptor = Array.from(detections[0].descriptor);
+      try { await addDoc(facesCollectionRef, { name, descriptor }); showStatus(`已註冊：${name}`, 'success'); }
+      catch (e) { console.error('註冊失敗', e); showStatus('註冊失敗', 'error'); }
+    }
+
+    async function main() {
+      await loadModels();
+      await initFirebase();
+      loginButton.onclick = handleLogin;
+    }
+
+    main();
+  </script>
+</body>
+</html>
