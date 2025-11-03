@@ -50,12 +50,15 @@
             <input id="nameInputAdmin" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm" placeholder="例如：王小明">
           </div>
           <button id="toggleCameraAdmin" class="bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700">啟動攝影機</button>
+          <button id="recaptureButtonAdmin" class="bg-yellow-600 text-white font-bold py-2 px-4 rounded-md hover:bg-yellow-700 hidden">重拍</button>
+          <button id="cancelEditButtonAdmin" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600 hidden">取消編輯</button>
           <button id="registerButtonAdmin" class="bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700">註冊</button>
         </div>
         <div id="videoContainerAdmin" class="video-container mx-auto bg-gray-900 rounded-lg overflow-hidden shadow-inner hidden">
           <video id="videoAdmin" autoplay muted playsinline></video>
           <canvas id="canvasAdmin"></canvas>
         </div>
+        <p id="editorHint" class="text-sm text-gray-500 mt-2 hidden">編輯模式：可更改姓名並重拍人臉後儲存</p>
       </div>
 
       <!-- 右：已註冊清單 -->
@@ -71,7 +74,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { initializeFirestore, collection, addDoc, onSnapshot, query, setLogLevel, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { initializeFirestore, collection, addDoc, onSnapshot, query, setLogLevel, getDocs, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const ADMIN_EMAIL = 'nwapp.eason@gmail.com';
 
@@ -91,12 +94,18 @@
     const registerButtonAdmin = document.getElementById('registerButtonAdmin');
     const nameInputAdmin = document.getElementById('nameInputAdmin');
     const registeredFacesList = document.getElementById('registeredFacesList');
+    const recaptureButtonAdmin = document.getElementById('recaptureButtonAdmin');
+    const cancelEditButtonAdmin = document.getElementById('cancelEditButtonAdmin');
+    const editorHint = document.getElementById('editorHint');
 
     let db, auth, appId, userId;
     let facesCollectionRef;
     let faceMatcher;
     let localStreamAdmin;
     let recognitionIntervalAdmin;
+    let facesDocs = [];
+    let editingFaceId = null;
+    let editDescriptor = null;
 
     function showStatus(message, type = 'info') {
       statusMessage.textContent = message;
@@ -165,8 +174,11 @@
       loginView.classList.add('hidden');
       adminView.classList.remove('hidden');
       toggleCameraAdmin.onclick = onToggleCameraAdmin;
-      registerButtonAdmin.onclick = onRegisterClickAdmin;
+      registerButtonAdmin.onclick = onRegisterOrSaveClick;
+      recaptureButtonAdmin.onclick = onRecaptureClick;
+      cancelEditButtonAdmin.onclick = exitEditMode;
       logoutButtonAdmin.onclick = () => signOut(auth);
+      registeredFacesList.addEventListener('click', onFacesListClick);
     }
 
     async function handleLogin() {
@@ -178,9 +190,9 @@
 
     function listenToFaces() {
       onSnapshot(query(facesCollectionRef), (snapshot) => {
-        const docs = snapshot.docs.map(d => d.data());
-        registeredFacesList.innerHTML = docs.map(d => `<div class="p-2 border-b border-gray-200"><p class="font-semibold">${d.name}</p></div>`).join('') || '<p class="text-gray-500 text-center">尚無資料</p>';
-        const labeled = docs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
+        facesDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderFacesList();
+        const labeled = facesDocs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
         faceMatcher = labeled.length > 0 ? new faceapi.FaceMatcher(labeled, 0.6) : undefined;
       }, (e) => { console.error('faces 監聽失敗', e); showStatus('faces 監聽失敗，將改為一次性載入', 'error'); });
     }
@@ -188,11 +200,28 @@
     async function loadInitialFaces() {
       try {
         const snap = await getDocs(query(facesCollectionRef));
-        const docs = snap.docs.map(d => d.data());
-        registeredFacesList.innerHTML = docs.map(d => `<div class="p-2 border-b border-gray-200"><p class="font-semibold">${d.name}</p></div>`).join('') || '<p class="text-gray-500 text-center">尚無資料</p>';
-        const labeled = docs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
+        facesDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderFacesList();
+        const labeled = facesDocs.map(d => new faceapi.LabeledFaceDescriptors(d.name, [new Float32Array(d.descriptor)]));
         faceMatcher = labeled.length > 0 ? new faceapi.FaceMatcher(labeled, 0.6) : undefined;
       } catch (e) { console.error('faces 初始載入失敗', e); }
+    }
+
+    function renderFacesList() {
+      registeredFacesList.innerHTML = facesDocs.length
+        ? facesDocs.map(d => `
+            <div class="flex items-center justify-between p-2 border-b border-gray-200">
+              <div>
+                <p class="font-semibold">${d.name}</p>
+                <p class="text-xs text-gray-500">id: ${d.id}</p>
+              </div>
+              <div class="flex gap-2">
+                <button class="edit-face bg-blue-600 text-white text-sm px-3 py-1 rounded" data-id="${d.id}">編輯</button>
+                <button class="delete-face bg-red-600 text-white text-sm px-3 py-1 rounded" data-id="${d.id}">刪除</button>
+              </div>
+            </div>
+          `).join('')
+        : '<p class="text-gray-500 text-center">尚無資料</p>';
     }
 
     function onToggleCameraAdmin() {
@@ -238,7 +267,60 @@
           const result = faceMatcher ? faceMatcher.findBestMatch(d.descriptor) : { toString: ()=>'unknown', label:'unknown' };
           new faceapi.draw.DrawBox(d.detection.box, { label: result.toString(), boxColor: 'red' }).draw(canvasAdmin);
         });
+        if (editingFaceId && detections.length > 0) {
+          editDescriptor = Array.from(detections[0].descriptor);
+        }
       }
+    }
+
+    function onFacesListClick(e) {
+      const target = e.target;
+      if (target.classList.contains('edit-face')) {
+        const id = target.getAttribute('data-id');
+        startEditFace(id);
+      } else if (target.classList.contains('delete-face')) {
+        const id = target.getAttribute('data-id');
+        deleteFace(id);
+      }
+    }
+
+    function startEditFace(id) {
+      const face = facesDocs.find(f => f.id === id);
+      if (!face) return;
+      editingFaceId = id;
+      editDescriptor = face.descriptor;
+      nameInputAdmin.value = face.name;
+      registerButtonAdmin.textContent = '儲存變更';
+      recaptureButtonAdmin.classList.remove('hidden');
+      cancelEditButtonAdmin.classList.remove('hidden');
+      editorHint.classList.remove('hidden');
+      if (!localStreamAdmin) { startVideoAdmin(); toggleCameraAdmin.textContent = '停止攝影機'; }
+      showStatus(`編輯：${face.name}`, 'info');
+    }
+
+    function exitEditMode() {
+      editingFaceId = null;
+      editDescriptor = null;
+      registerButtonAdmin.textContent = '註冊';
+      recaptureButtonAdmin.classList.add('hidden');
+      cancelEditButtonAdmin.classList.add('hidden');
+      editorHint.classList.add('hidden');
+      nameInputAdmin.value = '';
+    }
+
+    async function onRecaptureClick() {
+      if (!localStreamAdmin) { showStatus('請先啟動攝影機', 'error'); return; }
+      const detections = await faceapi.detectAllFaces(videoAdmin, new faceapi.TinyFaceDetectorOptions())
+                                      .withFaceLandmarks()
+                                      .withFaceDescriptors();
+      if (detections.length === 0) { showStatus('沒有偵測到人臉', 'error'); return; }
+      editDescriptor = Array.from(detections[0].descriptor);
+      showStatus('已重拍，可按「儲存變更」', 'success');
+    }
+
+    async function onRegisterOrSaveClick() {
+      if (editingFaceId) { return saveEditFace(); }
+      return onRegisterClickAdmin();
     }
 
     async function onRegisterClickAdmin() {
@@ -258,6 +340,27 @@
         console.error('註冊失敗', e);
         showStatus(`註冊失敗：${e?.message || '未知錯誤'}`, 'error');
       }
+    }
+
+    async function saveEditFace() {
+      const name = nameInputAdmin.value.trim();
+      if (!name) { showStatus('請輸入姓名', 'error'); return; }
+      if (!editingFaceId) return;
+      try {
+        const ref = doc(facesCollectionRef, editingFaceId);
+        await updateDoc(ref, { name, descriptor: editDescriptor });
+        showStatus('已儲存變更', 'success');
+        exitEditMode();
+      } catch (e) { console.error('更新失敗', e); showStatus(`更新失敗：${e?.message || '未知錯誤'}`, 'error'); }
+    }
+
+    async function deleteFace(id) {
+      try {
+        const ref = doc(facesCollectionRef, id);
+        await deleteDoc(ref);
+        showStatus('已刪除', 'success');
+        if (editingFaceId === id) exitEditMode();
+      } catch (e) { console.error('刪除失敗', e); showStatus(`刪除失敗：${e?.message || '未知錯誤'}`, 'error'); }
     }
 
     async function main() {
