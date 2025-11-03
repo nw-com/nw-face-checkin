@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>西北社區打卡系統</title>
+    <title>西北巡邏打卡系統</title>
     <style>
       :root { --red:#d90429; --gray:#f3f4f6; --dark:#111827; --muted:#6b7280; }
       * { box-sizing: border-box; }
@@ -93,9 +93,9 @@
       </section>
     </div>
 
-    <!-- Human: 臉偵測/辨識 -->
-    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/dist/human.js"></script>
+    <!-- Human: 臉偵測/辨識（用 ESM 匯入避免全域未定義） -->
     <script type="module">
+      import * as HumanLib from "https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/dist/human.esm.js";
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
       import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
       import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
@@ -123,13 +123,13 @@
       const nowText = $("nowText");
 
       // Human 設定
-      const human = new Human.Human({
+      const human = new HumanLib.Human({
         modelBasePath: "https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/models",
         cacheModels: true,
         warmup: "none",
         face: { enabled: true, detector: { rotation: true }, mesh: false, attention: false, description: true, embedding: true },
       });
-      await human.load();
+      try { await human.load(); } catch (e) { console.error(e); }
 
       function setView(which) {
         viewLogin.classList.add("hidden");
