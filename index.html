@@ -3,184 +3,273 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Firebase 帳號密碼登入範例</title>
+    <title>西北社區打卡系統</title>
     <style>
-      :root {
-        color-scheme: light dark;
-      }
-      body {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-        margin: 0;
-        padding: 2rem;
-        display: grid;
-        place-items: center;
-        background: #0f172a;
-        color: #e2e8f0;
-      }
-      .card {
-        width: 100%;
-        max-width: 560px;
-        background: #0b1220;
-        border: 1px solid #1f2937;
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-      }
-      h1 { font-size: 1.25rem; margin: 0 0 1rem; }
-      .row { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
-      label { font-size: 0.9rem; color: #93c5fd; }
-      input[type="email"], input[type="password"], input[type="text"] {
-        width: 100%;
-        padding: 0.6rem 0.75rem;
-        border-radius: 8px;
-        border: 1px solid #334155;
-        background: #0b1220;
-        color: #e2e8f0;
-      }
-      .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; }
-      button {
-        padding: 0.6rem 0.75rem;
-        border-radius: 8px;
-        border: 1px solid #334155;
-        background: #1d4ed8;
-        color: white;
-        cursor: pointer;
-      }
-      button.secondary { background: #334155; }
-      .muted { font-size: 0.85rem; color: #94a3b8; }
-      .message { margin-top: 0.75rem; font-size: 0.95rem; }
-      .ok { color: #22c55e; }
-      .err { color: #ef4444; }
-      .divider { height: 1px; background: #1f2937; margin: 1rem 0; }
-      .userBox { background: #0b1220; border: 1px dashed #334155; border-radius: 8px; padding: 0.75rem; }
-      code { background: #0b1220; border: 1px solid #334155; padding: 0.2rem 0.4rem; border-radius: 6px; }
+      :root { --red:#d90429; --gray:#f3f4f6; --dark:#111827; --muted:#6b7280; }
+      * { box-sizing: border-box; }
+      body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--red); }
+      .wrap { min-height: 100vh; display:grid; place-items:center; padding: 2rem; }
+      .card { width:100%; max-width:560px; background:#fff; border-radius:16px; box-shadow:0 18px 48px rgba(0,0,0,0.25); padding:1.5rem; }
+      .title { display:flex; align-items:center; gap:.5rem; justify-content:center; margin:0 0 .75rem; }
+      .title .icon { width:36px; height:36px; border-radius:50%; border:3px solid var(--red); display:grid; place-items:center; color:var(--red); font-weight:bold; }
+      .subtitle { text-align:center; color:#374151; font-size:.9rem; margin-bottom:1rem; }
+      .row { display:grid; gap:.5rem; margin:.5rem 0; }
+      label { color:#374151; font-size:.9rem; }
+      input[type="email"], input[type="password"], input[type="text"] { width:100%; padding:.7rem .8rem; border:1px solid #e5e7eb; background:#fff; border-radius:10px; }
+      .flex { display:flex; align-items:center; gap:.5rem; }
+      .btn { display:block; width:100%; padding:.9rem; border-radius:10px; border:none; background:var(--red); color:#fff; font-weight:600; cursor:pointer; }
+      .btn.gray { background:#e5e7eb; color:#1f2937; }
+      .btn.line { background:#fff; border:1px solid #e5e7eb; color:#111827; }
+      .grid { display:grid; grid-template-columns: 1fr 1fr; gap:.6rem; margin-top:.6rem; }
+      .muted { color:var(--muted); font-size:.85rem; }
+      .divider { height:1px; background:#e5e7eb; margin:1rem 0; }
+      .hidden { display:none; }
+      /* 前台/後台共用區塊 */
+      .section { width:100%; max-width:760px; background:#fff; border-radius:16px; box-shadow:0 18px 48px rgba(0,0,0,0.25); padding:1rem; }
+      .section h2 { margin:.25rem 0 1rem; text-align:center; }
+      .timeBtn { width:100%; font-size:1.1rem; }
+      .cam { background:var(--gray); border-radius:12px; padding:.75rem; display:grid; gap:.5rem; }
+      video { width:100%; max-height:360px; border-radius:12px; background:#000; }
+      .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:.5rem; }
+      .thumb { background:#fff; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; }
+      .thumb img { width:100%; display:block; }
+      .thumb .label { padding:.35rem .5rem; font-size:.85rem; border-top:1px solid #e5e7eb; }
     </style>
   </head>
   <body>
-    <div class="card">
-      <h1>Firebase 帳號密碼登入/註冊</h1>
+    <div class="wrap">
+      <!-- Login -->
+      <section id="view-login" class="card">
+        <div class="title">
+          <div class="icon">✔</div>
+          <h1 style="margin:0;">西北社區打卡系統</h1>
+        </div>
+        <div class="subtitle">社區網頁版</div>
+        <div class="row">
+          <label>電子郵件或手機號碼</label>
+          <input id="email" type="email" placeholder="請輸入 電子郵件或手機號碼" />
+        </div>
+        <div class="row">
+          <label>密碼</label>
+          <input id="password" type="password" placeholder="密碼" />
+        </div>
+        <button id="btnSignIn" class="btn">登入</button>
+        <div class="grid">
+          <button id="btnSignUp" class="btn gray">申請帳號</button>
+          <button id="btnReset" class="btn line">忘記密碼</button>
+        </div>
+        <div class="flex" style="justify-content:space-between;margin-top:.5rem;">
+          <label class="flex"><input id="remember" type="checkbox" /> 記住我</label>
+          <button id="btnSignOut" class="btn line" style="max-width:140px;">登出</button>
+        </div>
+        <div id="msg" class="muted" style="margin-top:.6rem;"></div>
+      </section>
 
-      <div class="row">
-        <label for="email">Email</label>
-        <input id="email" type="email" placeholder="you@example.com" />
-      </div>
-      <div class="row" style="margin-top:0.5rem;">
-        <label for="password">密碼</label>
-        <input id="password" type="password" placeholder="至少 6 個字元" />
-      </div>
+      <!-- Admin -->
+      <section id="view-admin" class="section hidden">
+        <h2>後台</h2>
+        <div class="grid">
+          <input id="faceName" type="text" placeholder="姓名" />
+          <button id="btnMakeAdmin" class="btn line">設為管理員</button>
+        </div>
+        <div class="grid" style="margin-top:.6rem;">
+          <button id="btnStartRegCam" class="btn">人臉註冊：開啟相機</button>
+          <button id="btnSaveFace" class="btn gray">儲存人臉</button>
+        </div>
+        <div class="cam" style="margin-top:.6rem;">
+          <video id="regVideo" playsinline muted></video>
+          <div class="thumbs" id="regThumbs"></div>
+        </div>
+      </section>
 
-      <div class="actions">
-        <button id="btnSignUp">註冊</button>
-        <button id="btnSignIn" class="secondary">登入</button>
-      </div>
-      <div class="actions">
-        <button id="btnReset" class="secondary">寄送重設密碼信</button>
-        <button id="btnSignOut">登出</button>
-      </div>
-
-      <div id="msg" class="message"></div>
-
-      <div class="divider"></div>
-
-      <div class="userBox">
-        <div class="muted">目前使用者狀態：</div>
-        <div id="userState">尚未登入</div>
-      </div>
-
-      <div class="divider"></div>
-
-      <p class="muted">
-        使用前請至 Firebase Console 建立專案，啟用 <b>Email/Password</b>，
-        並將你的 <code>firebaseConfig</code> 參數填入下方程式。
-      </p>
+      <!-- User -->
+      <section id="view-user" class="section hidden">
+        <h2>前台</h2>
+        <button id="btnCheckin" class="btn timeBtn">打卡 - <span id="nowText">--:--:--</span></button>
+        <div class="cam" style="margin-top:.6rem;">
+          <video id="userVideo" playsinline muted></video>
+          <div class="thumbs" id="userThumbs"></div>
+        </div>
+      </section>
     </div>
 
+    <!-- Human: 臉偵測/辨識 -->
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/dist/human.js"></script>
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
-      import {
-        getAuth,
-        createUserWithEmailAndPassword,
-        signInWithEmailAndPassword,
-        sendPasswordResetEmail,
-        onAuthStateChanged,
-        signOut,
-      } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+      import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
+      import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
 
-      // 將以下參數替換為你的 Firebase 專案設定
+      // Firebase 設定：請填入你的專案值
       const firebaseConfig = {
-  apiKey: "AIzaSyCyTFIQn-gTHX8ipQ-oekus_d3Sg1kiHNY",
-  authDomain: "nw-face-checkin.firebaseapp.com",
-  projectId: "nw-face-checkin",
-  storageBucket: "nw-face-checkin.firebasestorage.app",
-  messagingSenderId: "187703864109",
-  appId: "1:187703864109:web:675ba96fe40c111512c1a4",
-  measurementId: "G-NRDLBL3NJP"
-};
+        apiKey: "AIzaSyCyTFIQn-gTHX8ipQ-oekus_d3Sg1kiHNY",
+        authDomain: "nw-face-checkin.firebaseapp.com",
+        projectId: "nw-face-checkin",
+        storageBucket: "nw-face-checkin.firebasestorage.app",
+        messagingSenderId: "187703864109",
+        appId: "1:187703864109:web:675ba96fe40c111512c1a4",
+        measurementId: "G-NRDLBL3NJP"
+      };
 
       const app = initializeApp(firebaseConfig);
       const auth = getAuth(app);
+      const db = getFirestore(app);
 
       const $ = (id) => document.getElementById(id);
       const msg = $("msg");
-      const userState = $("userState");
+      const viewLogin = $("view-login");
+      const viewAdmin = $("view-admin");
+      const viewUser = $("view-user");
+      const nowText = $("nowText");
 
-      const showMsg = (text, type = "ok") => {
-        msg.textContent = text;
-        msg.className = `message ${type}`;
-      };
-
-      const readInputs = () => ({
-        email: $("email").value.trim(),
-        password: $("password").value,
+      // Human 設定
+      const human = new Human.Human({
+        modelBasePath: "https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/models",
+        cacheModels: true,
+        warmup: "none",
+        face: { enabled: true, detector: { rotation: true }, mesh: false, attention: false, description: true, embedding: true },
       });
+      await human.load();
 
-      onAuthStateChanged(auth, (user) => {
-        if (user) {
-          userState.textContent = `已登入：${user.email}`;
-        } else {
-          userState.textContent = "尚未登入";
-        }
-      });
+      function setView(which) {
+        viewLogin.classList.add("hidden");
+        viewAdmin.classList.add("hidden");
+        viewUser.classList.add("hidden");
+        which.classList.remove("hidden");
+      }
 
-      $("btnSignUp").addEventListener("click", async () => {
-        const { email, password } = readInputs();
-        if (!email || !password) return showMsg("請輸入 Email 與密碼", "err");
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-          showMsg("註冊成功並已登入！", "ok");
-        } catch (err) {
-          showMsg(`註冊失敗：${err.code || err.message}`, "err");
-        }
-      });
+      async function getRole(uid) {
+        const r = await getDoc(doc(db, "roles", uid));
+        return r.exists() ? r.data().role : "user";
+      }
 
+      async function setRole(uid, role) {
+        await setDoc(doc(db, "roles", uid), { role }, { merge: true });
+      }
+
+      function showMsg(text) { msg.textContent = text || ""; }
+
+      function startClock() {
+        const fmt = (n) => String(n).padStart(2, "0");
+        setInterval(() => {
+          const d = new Date();
+          const s = `${d.getFullYear()}/${fmt(d.getMonth()+1)}/${fmt(d.getDate())} ${fmt(d.getHours())}:${fmt(d.getMinutes())}:${fmt(d.getSeconds())}`;
+          nowText.textContent = s;
+        }, 1000);
+      }
+      startClock();
+
+      // 登入/註冊/重設
       $("btnSignIn").addEventListener("click", async () => {
-        const { email, password } = readInputs();
-        if (!email || !password) return showMsg("請輸入 Email 與密碼", "err");
+        const email = $("email").value.trim();
+        const password = $("password").value;
+        if (!email || !password) return showMsg("請輸入帳密");
         try {
           await signInWithEmailAndPassword(auth, email, password);
-          showMsg("登入成功！", "ok");
-        } catch (err) {
-          showMsg(`登入失敗：${err.code || err.message}`, "err");
-        }
+          showMsg("登入成功");
+        } catch (err) { showMsg(err.code || err.message); }
       });
-
+      $("btnSignUp").addEventListener("click", async () => {
+        const email = $("email").value.trim();
+        const password = $("password").value;
+        if (!email || !password) return showMsg("請輸入帳密");
+        try {
+          await createUserWithEmailAndPassword(auth, email, password);
+          showMsg("已建立帳號");
+        } catch (err) { showMsg(err.code || err.message); }
+      });
       $("btnReset").addEventListener("click", async () => {
         const email = $("email").value.trim();
-        if (!email) return showMsg("請輸入欲重設的 Email", "err");
-        try {
-          await sendPasswordResetEmail(auth, email);
-          showMsg("已寄出重設密碼信（請到信箱檢查）", "ok");
-        } catch (err) {
-          showMsg(`寄送失敗：${err.code || err.message}`, "err");
-        }
+        if (!email) return showMsg("輸入 Email");
+        try { await sendPasswordResetEmail(auth, email); showMsg("已寄出重設信"); } catch (err) { showMsg(err.code || err.message); }
+      });
+      $("btnSignOut").addEventListener("click", async () => { try { await signOut(auth); showMsg("已登出"); setView(viewLogin); } catch (err) { showMsg(err.code || err.message); } });
+
+      onAuthStateChanged(auth, async (user) => {
+        if (!user) return setView(viewLogin);
+        const role = await getRole(user.uid);
+        if (role === "admin") setView(viewAdmin); else setView(viewUser);
       });
 
-      $("btnSignOut").addEventListener("click", async () => {
-        try {
-          await signOut(auth);
-          showMsg("已登出", "ok");
-        } catch (err) {
-          showMsg(`登出失敗：${err.code || err.message}`, "err");
+      // 設為管理員
+      $("btnMakeAdmin").addEventListener("click", async () => {
+        const user = auth.currentUser; if (!user) return;
+        await setRole(user.uid, "admin"); showMsg("已設為管理員"); setView(viewAdmin);
+      });
+
+      // 相機工具
+      async function startCam(videoEl) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        videoEl.srcObject = stream; await videoEl.play();
+        return stream;
+      }
+      function stopCam(videoEl) {
+        const s = videoEl.srcObject; if (s) s.getTracks().forEach(t => t.stop()); videoEl.srcObject = null;
+      }
+      function cropFaceToImage(videoEl, face) {
+        const c = document.createElement("canvas");
+        const { x, y, width, height } = face.box;
+        c.width = width; c.height = height;
+        const ctx = c.getContext("2d");
+        ctx.drawImage(videoEl, x, y, width, height, 0, 0, width, height);
+        return c.toDataURL("image/png");
+      }
+      // 取得所有註冊人臉
+      async function fetchFaces() {
+        const snap = await getDocs(collection(db, "faces"));
+        const arr = []; snap.forEach(d => { const v = d.data(); arr.push({ name: v.name, embedding: v.embedding }); });
+        return arr;
+      }
+      function distance(a, b) {
+        let s = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) { const d = (a[i] - b[i]); s += d * d; } return Math.sqrt(s);
+      }
+
+      // 後台：註冊人臉
+      let regStream;
+      $("btnStartRegCam").addEventListener("click", async () => {
+        if (regStream) { stopCam($("regVideo")); regStream = null; }
+        regStream = await startCam($("regVideo"));
+        const res = await human.detect($("regVideo"));
+        const thumbs = $("regThumbs"); thumbs.innerHTML = "";
+        res.face.forEach(f => {
+          const img = cropFaceToImage($("regVideo"), f);
+          const div = document.createElement("div"); div.className = "thumb";
+          div.innerHTML = `<img src="${img}"/><div class="label">臉</div>`; thumbs.appendChild(div);
+        });
+      });
+      $("btnSaveFace").addEventListener("click", async () => {
+        const name = $("faceName").value.trim(); if (!name) return showMsg("姓名");
+        const res = await human.detect($("regVideo")); if (!res.face[0]) return showMsg("未偵測到臉");
+        const emb = Array.from(res.face[0].embedding || []);
+        await addDoc(collection(db, "faces"), { name, embedding: emb });
+        showMsg("已儲存人臉");
+      });
+
+      // 前台：打卡與辨識
+      let userStream; let knownFaces = [];
+      async function ensureKnownFaces() { knownFaces = await fetchFaces(); }
+      await ensureKnownFaces();
+      $("btnCheckin").addEventListener("click", async () => {
+        if (userStream) { stopCam($("userVideo")); userStream = null; }
+        userStream = await startCam($("userVideo"));
+        await ensureKnownFaces();
+        const res = await human.detect($("userVideo"));
+        const thumbs = $("userThumbs"); thumbs.innerHTML = "";
+        const d = new Date(); const timeText = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+        for (const f of res.face) {
+          const img = cropFaceToImage($("userVideo"), f);
+          let label = "陌生人"; let best = { name:"", dist: 99 };
+          if (f.embedding && knownFaces.length) {
+            for (const k of knownFaces) {
+              const dist = distance(Array.from(f.embedding), k.embedding);
+              if (dist < best.dist) best = { name: k.name, dist };
+            }
+            if (best.dist < 0.6) label = `${best.name}｜${timeText}`; // 辨識
+          }
+          const div = document.createElement("div"); div.className = "thumb";
+          div.innerHTML = `<img src="${img}"/><div class="label">${label}</div>`; thumbs.appendChild(div);
+          const user = auth.currentUser;
+          await addDoc(collection(db, "attendance"), { uid: user ? user.uid : null, label, time: timeText, recognized: label !== "陌生人" });
         }
       });
     </script>
