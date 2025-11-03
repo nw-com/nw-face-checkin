@@ -16,21 +16,21 @@
             max-width: 640px; /* 最大寬度 */
             height: 480px;
         }
-        #video, #canvas {
+        #video, #canvas, #videoAdmin, #canvasAdmin {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
         }
-        #video {
+        #video, #videoAdmin {
             object-fit: cover;
         }
-        #canvas {
+        #canvas, #canvasAdmin {
             pointer-events: none; /* 讓 canvas 不會擋住下面的 video */
         }
         /* 快照畫布 */
-        #snapshotCanvas {
+        #snapshotCanvas, #snapshotCanvasAdmin {
             width: 150px;
             height: 150px;
             border-radius: 0.5rem;
@@ -122,13 +122,48 @@
     </div>
 
     <!-- 3. 管理員後台視圖 (預設隱藏) -->
-    <div id="adminView" class="container mx-auto max-w-6xl p-8 hidden">
+    <div id="adminView" class="container mx-auto max-w-7xl p-8 hidden"> <!-- 放大寬度 -->
         <div class="flex justify-between items-center mb-6">
             <h1 class="text-3xl font-bold text-gray-800">管理員後台</h1>
             <button id="logoutButtonAdmin" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600">登出</button>
         </div>
         
         <div class="flex flex-col lg:flex-row gap-8">
+            
+            <!-- 新增：管理員註冊區 -->
+            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">新增/管理人員</h2>
+
+                <!-- 啟動相機按鈕 -->
+                <button id="startAdminCamButton" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-lg">
+                    <span id="adminCamButtonText">開啟註冊相機</span>
+                </button>
+
+                <!-- 影片容器 (管理員) -->
+                <div id="videoContainerAdmin" class="video-container mx-auto bg-gray-900 rounded-lg overflow-hidden shadow-inner my-4 hidden">
+                    <video id="videoAdmin" autoplay muted playsinline></video>
+                    <canvas id="canvasAdmin"></canvas>
+                </div>
+
+                <!-- 快照區 (管理員) -->
+                <div id="snapshotContainerAdmin" class="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border hidden mt-4">
+                    <canvas id="snapshotCanvasAdmin"></canvas>
+                    <div>
+                        <p class="text-sm text-gray-500">目前偵測到：</p>
+                        <p id="snapshotNameAdmin" class="text-xl font-bold text-gray-800">偵測中...</p>
+                    </div>
+                </div>
+
+                <!-- 註冊區 (管理員) -->
+                <div id="adminRegisterBox" class="space-y-3 mt-8 border-t pt-6 hidden">
+                    <label for="nameInputAdmin" class="block text-sm font-medium text-gray-700">註冊新的人臉：</label>
+                    <input type="text" id="nameInputAdmin" placeholder="例如：王小明" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500">
+                    <button id="registerButtonAdmin" class="w-full bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:bg-gray-400">
+                        註冊人臉 (儲存至雲端)
+                    </button>
+                </div>
+            </div>
+
             <!-- 左側：已註冊人臉 -->
             <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
                 <h2 class="text-xl font-semibold mb-4 text-center">已註冊人臉列表</h2>
@@ -187,6 +222,19 @@
         const adminFacesList = document.getElementById('adminFacesList');
         const adminLogsList = document.getElementById('adminLogsList');
         const logoutButtonAdmin = document.getElementById('logoutButtonAdmin');
+        // 管理員註冊區
+        const startAdminCamButton = document.getElementById('startAdminCamButton');
+        const adminCamButtonText = document.getElementById('adminCamButtonText');
+        const videoContainerAdmin = document.getElementById('videoContainerAdmin');
+        const videoAdmin = document.getElementById('videoAdmin');
+        const canvasAdmin = document.getElementById('canvasAdmin');
+        const snapshotContainerAdmin = document.getElementById('snapshotContainerAdmin');
+        const snapshotCanvasAdmin = document.getElementById('snapshotCanvasAdmin');
+        const snapshotNameAdmin = document.getElementById('snapshotNameAdmin');
+        const adminRegisterBox = document.getElementById('adminRegisterBox');
+        const nameInputAdmin = document.getElementById('nameInputAdmin');
+        const registerButtonAdmin = document.getElementById('registerButtonAdmin');
+
 
         // --- 全局變數 ---
         let db, auth, userId, appId;
@@ -194,8 +242,8 @@
         let checkInLog = new Set(); // 本地快取 (防止重複打卡)
         let faceMatcher;
         let facesCollectionRef, checkInsCollectionRef; // Firestore 引用
-        let dateTimeInterval, recognitionInterval; // 計時器
-        let localStream; // 攝影機串流
+        let dateTimeInterval, recognitionInterval, adminRecognitionInterval; // 計時器
+        let localStream, adminStream; // 攝影機串流
 
         // --- 顯示狀態訊息 ---
         function showStatus(message, type = 'info') {
@@ -307,7 +355,9 @@
                         userId = null;
                         if (dateTimeInterval) clearInterval(dateTimeInterval);
                         if (recognitionInterval) clearInterval(recognitionInterval);
+                        if (adminRecognitionInterval) clearInterval(adminRecognitionInterval);
                         stopVideo();
+                        stopVideoAdmin(); // 登出時也關閉管理員相機
                         showView('login');
                     }
                 });
@@ -354,8 +404,10 @@
 
         function setupAdminView() {
             // 監聽器 (listenToFaces, listenToCheckIns) 已經在 onAuthStateChanged 啟動
-            // 它們會自動填充 #adminFacesList 和 #adminLogsList
             logoutButtonAdmin.onclick = handleLogout;
+            // 綁定管理員註冊按鈕
+            startAdminCamButton.onclick = onStartAdminCamButtonClick;
+            registerButtonAdmin.onclick = onRegisterClickAdmin;
         }
 
         // 5. 即時日期時間
@@ -456,7 +508,7 @@
             });
         }
 
-        // 9. 註冊人臉
+        // 9. 註冊人臉 (使用者)
         async function onRegisterClick() {
             if (!userId) {
                 showStatus('Firebase 尚未準備就緒，請稍候。', 'error');
@@ -511,7 +563,51 @@
             registerButton.disabled = false;
         }
 
-        // 10. 打卡按鈕控制
+        // 9-Admin. 註冊人臉 (管理員)
+        async function onRegisterClickAdmin() {
+            const name = nameInputAdmin.value.trim();
+            if (!name) {
+                showStatus('請輸入姓名！', 'error');
+                return;
+            }
+            if (!adminStream) {
+                showStatus('請先開啟註冊相機。', 'error');
+                return;
+            }
+
+            showStatus(`(管理員) 正在註冊 ${name}... 請直視鏡頭。`, 'info');
+            registerButtonAdmin.disabled = true;
+
+            try {
+                const detection = await faceapi.detectSingleFace(videoAdmin, new faceapi.TinyFaceDetectorOptions())
+                                             .withFaceLandmarks()
+                                             .withFaceDescriptor();
+                if (!detection) {
+                    showStatus('註冊失敗，未偵測到臉部。', 'error');
+                    registerButtonAdmin.disabled = false;
+                    return;
+                }
+
+                showStatus(`偵測完畢，正在上傳 ${name} 的資料到 Firebase...`, 'info');
+                
+                const faceData = {
+                    name: name,
+                    descriptor: Array.from(detection.descriptor)
+                };
+
+                await addDoc(facesCollectionRef, faceData);
+                showStatus(`${name} 註冊成功！資料已儲存。`, 'success');
+                nameInputAdmin.value = '';
+                checkInLog.delete(name); 
+
+            } catch (error) {
+                console.error("管理員註冊失敗：", error);
+                showStatus('註冊時發生錯誤。', 'error');
+            }
+            registerButtonAdmin.disabled = false;
+        }
+
+        // 10. 打卡按鈕控制 (使用者)
         function onCheckInButtonClick() {
             if (localStream) {
                 // 正在打卡 -> 停止
@@ -534,9 +630,34 @@
             }
         }
 
-        // 11. 啟動/停止攝影機
+        // 10-Admin. 啟動相機按鈕 (管理員)
+        function onStartAdminCamButtonClick() {
+            if (adminStream) {
+                // 正在註冊 -> 停止
+                stopVideoAdmin();
+                videoContainerAdmin.classList.add('hidden');
+                snapshotContainerAdmin.classList.add('hidden');
+                adminRegisterBox.classList.add('hidden');
+                adminCamButtonText.textContent = '開啟註冊相機';
+                startAdminCamButton.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                startAdminCamButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+
+            } else {
+                // 停止 -> 開始註冊
+                startVideoAdmin();
+                videoContainerAdmin.classList.remove('hidden');
+                snapshotContainerAdmin.classList.remove('hidden');
+                adminRegisterBox.classList.remove('hidden');
+                adminCamButtonText.textContent = '關閉相機';
+                startAdminCamButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                startAdminCamButton.classList.add('bg-gray-600', 'hover:bg-gray-700');
+            }
+        }
+
+
+        // 11. 啟動/停止攝影機 (使用者)
         async function startVideo() {
-            if (localStream) return; // 如果已經啟動，則不重複
+            if (localStream) return; 
             try {
                 localStream = await navigator.mediaDevices.getUserMedia({ video: {} });
                 video.srcObject = localStream;
@@ -544,9 +665,8 @@
                     const displaySize = { width: video.clientWidth, height: video.clientHeight };
                     faceapi.matchDimensions(canvas, displaySize);
                     
-                    // 啟動人臉辨識循環
                     if (recognitionInterval) clearInterval(recognitionInterval);
-                    recognitionInterval = setInterval(runRecognition, 500); // 辨識頻率 (500ms)
+                    recognitionInterval = setInterval(runRecognition, 500); 
                 });
             } catch (err) {
                 console.error("無法存取攝影機：", err);
@@ -561,8 +681,6 @@
                 localStream = null;
                 video.srcObject = null;
                 if (recognitionInterval) clearInterval(recognitionInterval);
-
-                // 清理快照
                 const sCtx = snapshotCanvas.getContext('2d');
                 sCtx.clearRect(0, 0, snapshotCanvas.width, snapshotCanvas.height);
                 snapshotName.textContent = '...';
@@ -570,7 +688,40 @@
             }
         }
 
-        // 12. 即時辨識循環 (核心)
+        // 11-Admin. 啟動/停止攝影機 (管理員)
+        async function startVideoAdmin() {
+            if (adminStream) return;
+            try {
+                adminStream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                videoAdmin.srcObject = adminStream;
+                videoAdmin.addEventListener('play', () => {
+                    const displaySize = { width: videoAdmin.clientWidth, height: videoAdmin.clientHeight };
+                    faceapi.matchDimensions(canvasAdmin, displaySize);
+                    
+                    if (adminRecognitionInterval) clearInterval(adminRecognitionInterval);
+                    adminRecognitionInterval = setInterval(runRecognitionAdmin, 500); 
+                });
+            } catch (err) {
+                console.error("無法存取攝影機 (管理員)：", err);
+                showStatus('無法存取攝影機。請檢查權限設定。', 'error');
+                adminStream = null;
+            }
+        }
+
+        function stopVideoAdmin() {
+            if (adminStream) {
+                adminStream.getTracks().forEach(track => track.stop());
+                adminStream = null;
+                videoAdmin.srcObject = null;
+                if (adminRecognitionInterval) clearInterval(adminRecognitionInterval);
+                const sCtx = snapshotCanvasAdmin.getContext('2d');
+                sCtx.clearRect(0, 0, snapshotCanvasAdmin.width, snapshotCanvasAdmin.height);
+                snapshotNameAdmin.textContent = '...';
+            }
+        }
+
+
+        // 12. 即時辨識循環 (使用者)
         async function runRecognition() {
             if (!video.paused && faceMatcher && localStream) { 
                 const displaySize = { width: video.clientWidth, height: video.clientHeight };
@@ -593,44 +744,76 @@
                     const d = resizedDetections[0]; // 只處理第一張臉
                     const result = faceMatcher.findBestMatch(d.descriptor);
                     
-                    // 1. 在主畫面上畫框
                     const box = d.detection.box;
                     const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: 'red' });
                     drawBox.draw(canvas);
-
-                    // 2. 畫出快照
                     sCtx.drawImage(video, box.x, box.y, box.width, box.height, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
 
-                    // 3. 處理打卡邏輯
                     if (result.label !== 'unknown') {
                         snapshotName.textContent = result.label;
                         
                         if (!checkInLog.has(result.label)) {
-                            // 尚未打卡 -> 執行打卡
                             snapshotTime.textContent = `打卡成功 @ ${new Date().toLocaleTimeString()}`;
                             snapshotTime.classList.remove('text-yellow-600');
                             snapshotTime.classList.add('text-green-600');
                             
-                            logCheckIn(result.label); // 寫入 Firebase
-                            checkInLog.add(result.label); // 加入本地快取
+                            logCheckIn(result.label); 
+                            checkInLog.add(result.label); 
                         } else {
-                            // 已打卡
                             snapshotTime.textContent = '今日已打卡';
                             snapshotTime.classList.remove('text-green-600');
                             snapshotTime.classList.add('text-yellow-600');
                         }
                     } else {
-                        // 陌生人
                         snapshotName.textContent = '陌生人';
                         snapshotTime.textContent = '';
                     }
                 } else {
-                    // 沒偵測到
                     snapshotName.textContent = '未偵測到人臉';
                     snapshotTime.textContent = '';
                 }
             }
         }
+
+        // 12-Admin. 即時辨識循環 (管理員)
+        async function runRecognitionAdmin() {
+            if (!videoAdmin.paused && faceMatcher && adminStream) { 
+                const displaySize = { width: videoAdmin.clientWidth, height: videoAdmin.clientHeight };
+                if (displaySize.width === 0 || displaySize.height === 0) return; 
+
+                faceapi.matchDimensions(canvasAdmin, displaySize);
+
+                const detections = await faceapi.detectAllFaces(videoAdmin, new faceapi.TinyFaceDetectorOptions())
+                                                .withFaceLandmarks()
+                                                .withFaceDescriptors();
+
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const ctx = canvasAdmin.getContext('2d');
+                ctx.clearRect(0, 0, canvasAdmin.width, canvasAdmin.height);
+                
+                const sCtx = snapshotCanvasAdmin.getContext('2d');
+                sCtx.clearRect(0, 0, snapshotCanvasAdmin.width, snapshotCanvasAdmin.height);
+
+                if (resizedDetections.length > 0) {
+                    const d = resizedDetections[0]; 
+                    const result = faceMatcher.findBestMatch(d.descriptor);
+                    
+                    const box = d.detection.box;
+                    const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: 'blue' }); // 管理員用藍色
+                    drawBox.draw(canvasAdmin);
+                    sCtx.drawImage(videoAdmin, box.x, box.y, box.width, box.height, 0, 0, snapshotCanvasAdmin.width, snapshotCanvasAdmin.height);
+
+                    if (result.label !== 'unknown') {
+                        snapshotNameAdmin.textContent = `${result.label} (已註冊)`;
+                    } else {
+                        snapshotNameAdmin.textContent = '新的人臉';
+                    }
+                } else {
+                    snapshotNameAdmin.textContent = '未偵測到人臉';
+                }
+            }
+        }
+
 
         // 13. 紀錄打卡 (寫入 Firebase)
         async function logCheckIn(name) {
