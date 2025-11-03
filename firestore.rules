@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'nwapp.eason@gmail.com';
+    }
+
+    // faces: 只有管理員可寫入；登入使用者可讀取
+    match /artifacts/{project}/public/data/faces/{faceId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // check_ins: 任何登入使用者可新增自己的打卡紀錄；允許讀取以顯示列表
+    match /artifacts/{project}/public/data/check_ins/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // 不允許修改或刪除
+    }
+
+    // 其他路徑一律拒絕
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
