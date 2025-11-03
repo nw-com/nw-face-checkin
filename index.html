@@ -1,277 +1,654 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>西北巡邏打卡系統</title>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>人臉打卡系統 (Firebase版)</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 face-api.js -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-      :root { --red:#d90429; --gray:#f3f4f6; --dark:#111827; --muted:#6b7280; }
-      * { box-sizing: border-box; }
-      body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: var(--red); }
-      .wrap { min-height: 100vh; display:grid; place-items:center; padding: 2rem; }
-      .card { width:100%; max-width:560px; background:#fff; border-radius:16px; box-shadow:0 18px 48px rgba(0,0,0,0.25); padding:1.5rem; }
-      .title { display:flex; align-items:center; gap:.5rem; justify-content:center; margin:0 0 .75rem; }
-      .title .icon { width:36px; height:36px; border-radius:50%; border:3px solid var(--red); display:grid; place-items:center; color:var(--red); font-weight:bold; }
-      .subtitle { text-align:center; color:#374151; font-size:.9rem; margin-bottom:1rem; }
-      .row { display:grid; gap:.5rem; margin:.5rem 0; }
-      label { color:#374151; font-size:.9rem; }
-      input[type="email"], input[type="password"], input[type="text"] { width:100%; padding:.7rem .8rem; border:1px solid #e5e7eb; background:#fff; border-radius:10px; }
-      .flex { display:flex; align-items:center; gap:.5rem; }
-      .btn { display:block; width:100%; padding:.9rem; border-radius:10px; border:none; background:var(--red); color:#fff; font-weight:600; cursor:pointer; }
-      .btn.gray { background:#e5e7eb; color:#1f2937; }
-      .btn.line { background:#fff; border:1px solid #e5e7eb; color:#111827; }
-      .grid { display:grid; grid-template-columns: 1fr 1fr; gap:.6rem; margin-top:.6rem; }
-      .muted { color:var(--muted); font-size:.85rem; }
-      .divider { height:1px; background:#e5e7eb; margin:1rem 0; }
-      .hidden { display:none; }
-      /* 前台/後台共用區塊 */
-      .section { width:100%; max-width:760px; background:#fff; border-radius:16px; box-shadow:0 18px 48px rgba(0,0,0,0.25); padding:1rem; }
-      .section h2 { margin:.25rem 0 1rem; text-align:center; }
-      .timeBtn { width:100%; font-size:1.1rem; }
-      .cam { background:var(--gray); border-radius:12px; padding:.75rem; display:grid; gap:.5rem; }
-      video { width:100%; max-height:360px; border-radius:12px; background:#000; }
-      .thumbs { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:.5rem; }
-      .thumb { background:#fff; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; }
-      .thumb img { width:100%; display:block; }
-      .thumb .label { padding:.35rem .5rem; font-size:.85rem; border-top:1px solid #e5e7eb; }
+        /* 確保 canvas 疊在 video 上面 */
+        .video-container {
+            position: relative;
+            width: 100%; /* 寬度自適應 */
+            max-width: 640px; /* 最大寬度 */
+            height: 480px;
+        }
+        #video, #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #video {
+            object-fit: cover;
+        }
+        #canvas {
+            pointer-events: none; /* 讓 canvas 不會擋住下面的 video */
+        }
+        /* 快照畫布 */
+        #snapshotCanvas {
+            width: 150px;
+            height: 150px;
+            border-radius: 0.5rem;
+            border: 2px solid #E5E7EB; /* gray-200 */
+            background-color: #374151; /* gray-700 */
+        }
     </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <!-- Login -->
-      <section id="view-login" class="card">
-        <div class="title">
-          <div class="icon">✔</div>
-          <h1 style="margin:0;">西北社區打卡系統</h1>
-        </div>
-        <div class="subtitle">社區網頁版</div>
-        <div class="row">
-          <label>電子郵件或手機號碼</label>
-          <input id="email" type="email" placeholder="請輸入 電子郵件或手機號碼" />
-        </div>
-        <div class="row">
-          <label>密碼</label>
-          <input id="password" type="password" placeholder="密碼" />
-        </div>
-        <button id="btnSignIn" class="btn">登入</button>
-        <div class="grid">
-          <button id="btnSignUp" class="btn gray">申請帳號</button>
-          <button id="btnReset" class="btn line">忘記密碼</button>
-        </div>
-        <div class="flex" style="justify-content:space-between;margin-top:.5rem;">
-          <label class="flex"><input id="remember" type="checkbox" /> 記住我</label>
-          <button id="btnSignOut" class="btn line" style="max-width:140px;">登出</button>
-        </div>
-        <div id="msg" class="muted" style="margin-top:.6rem;"></div>
-      </section>
+</head>
+<body class="bg-gray-100 font-sans leading-normal tracking-normal">
 
-      <!-- Admin -->
-      <section id="view-admin" class="section hidden">
-        <h2>後台</h2>
-        <div class="grid">
-          <input id="faceName" type="text" placeholder="姓名" />
-          <button id="btnMakeAdmin" class="btn line">設為管理員</button>
-        </div>
-        <div class="grid" style="margin-top:.6rem;">
-          <button id="btnStartRegCam" class="btn">人臉註冊：開啟相機</button>
-          <button id="btnSaveFace" class="btn gray">儲存人臉</button>
-        </div>
-        <div class="cam" style="margin-top:.6rem;">
-          <video id="regVideo" playsinline muted></video>
-          <div class="thumbs" id="regThumbs"></div>
-        </div>
-      </section>
-
-      <!-- User -->
-      <section id="view-user" class="section hidden">
-        <h2>前台</h2>
-        <button id="btnCheckin" class="btn timeBtn">打卡 - <span id="nowText">--:--:--</span></button>
-        <div class="cam" style="margin-top:.6rem;">
-          <video id="userVideo" playsinline muted></video>
-          <div class="thumbs" id="userThumbs"></div>
-        </div>
-      </section>
+    <!-- 狀態訊息 (全局) -->
+    <div id="statusMessage" class="hidden bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative m-4" role="alert">
+        <strong class="font-bold">系統狀態：</strong>
+        <span class="block sm:inline">...</span>
     </div>
 
-    <!-- Human: 臉偵測/辨識（用 ESM 匯入避免全域未定義） -->
+    <!-- 1. 登入視圖 (預設顯示) -->
+    <div id="loginView" class="container mx-auto max-w-sm p-8 mt-20 bg-white rounded-lg shadow-lg">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">人臉打卡系統</h1>
+        <div class="space-y-4">
+            <div>
+                <label for="emailInput" class="block text-sm font-medium text-gray-700">電子郵件</label>
+                <input type="email" id="emailInput" placeholder="user@example.com" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500">
+            </div>
+            <div>
+                <label for="passwordInput" class="block text-sm font-medium text-gray-700">密碼</label>
+                <input type="password" id="passwordInput" placeholder="********" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500">
+            </div>
+            <button id="loginButton" class="w-full bg-red-600 text-white font-bold py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:bg-gray-400">
+                登入
+            </button>
+            <p id="loginError" class="text-sm text-red-600 text-center"></p>
+        </div>
+    </div>
+
+    <!-- 2. 使用者前台視圖 (預設隱藏) -->
+    <div id="userView" class="container mx-auto max-w-4xl p-8 hidden">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">使用者前台</h1>
+            <button id="logoutButtonUser" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600">登出</button>
+        </div>
+        
+        <div class="flex flex-col lg:flex-row gap-8">
+            <!-- 左側：打卡與影像 -->
+            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">打卡上班</h2>
+                
+                <!-- 打卡按鈕 (含即時時間) -->
+                <button id="checkInButton" class="w-full bg-red-600 text-white font-bold py-4 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:bg-gray-400 text-lg">
+                    <span id="date-display">...</span>
+                    <span id="time-display" class="block text-2xl font-mono">...</span>
+                    <span id="checkInButtonText">點此開始打卡</span>
+                </button>
+
+                <!-- 影片容器 (預設隱藏) -->
+                <div id="videoContainer" class="video-container mx-auto bg-gray-900 rounded-lg overflow-hidden shadow-inner my-4 hidden">
+                    <video id="video" autoplay muted playsinline></video>
+                    <canvas id="canvas"></canvas>
+                </div>
+
+                <!-- 快照區 (預設隱藏) -->
+                <div id="snapshotContainer" class="flex items-center gap-4 p-4 bg-gray-50 rounded-lg border hidden mt-4">
+                    <canvas id="snapshotCanvas"></canvas>
+                    <div>
+                        <p class="text-sm text-gray-500">目前偵測到：</p>
+                        <p id="snapshotName" class="text-xl font-bold text-gray-800">偵測中...</p>
+                        <p id="snapshotTime" class="text-sm text-green-600"></p>
+                    </div>
+                </div>
+
+                <!-- 註冊區 (保留) -->
+                <div class="space-y-3 mt-8 border-t pt-6">
+                    <label for="nameInput" class="block text-sm font-medium text-gray-700">註冊新的人臉：</label>
+                    <input type="text" id="nameInput" placeholder="例如：王小明" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500">
+                    <button id="registerButton" class="w-full bg-gray-600 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:bg-gray-400">
+                        註冊人臉 (儲存至雲端)
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右側：打卡紀錄 -->
+            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">打卡紀錄 (來自雲端)</h2>
+                <div id="userLogsList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
+                    <p class="text-gray-500 text-center">正在連接 Firebase...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 管理員後台視圖 (預設隱藏) -->
+    <div id="adminView" class="container mx-auto max-w-6xl p-8 hidden">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">管理員後台</h1>
+            <button id="logoutButtonAdmin" class="bg-gray-500 text-white font-bold py-2 px-4 rounded-md hover:bg-gray-600">登出</button>
+        </div>
+        
+        <div class="flex flex-col lg:flex-row gap-8">
+            <!-- 左側：已註冊人臉 -->
+            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">已註冊人臉列表</h2>
+                <div id="adminFacesList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
+                    <p class="text-gray-500 text-center">讀取中...</p>
+                </div>
+            </div>
+
+            <!-- 右側：全系統打卡紀錄 -->
+            <div class="flex-1 bg-white p-6 rounded-lg shadow-lg">
+                <h2 class="text-xl font-semibold mb-4 text-center">全系統打卡紀錄</h2>
+                <div id="adminLogsList" class="h-96 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200">
+                    <p class="text-gray-500 text-center">讀取中...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
     <script type="module">
-      import * as HumanLib from "https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/dist/human.esm.js";
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-app.js";
-      import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-auth.js";
-      import { getFirestore, doc, getDoc, setDoc, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore.js";
+        // --- Firebase SDK Imports ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, serverTimestamp, setLogLevel, getDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-      // Firebase 設定：請填入你的專案值
-      const firebaseConfig = {
-        apiKey: "AIzaSyCyTFIQn-gTHX8ipQ-oekus_d3Sg1kiHNY",
-        authDomain: "nw-face-checkin.firebaseapp.com",
-        projectId: "nw-face-checkin",
-        storageBucket: "nw-face-checkin.firebasestorage.app",
-        messagingSenderId: "187703864109",
-        appId: "1:187703864109:web:675ba96fe40c111512c1a4",
-        measurementId: "G-NRDLBL3NJP"
-      };
+        // --- DOM 元素 (全局) ---
+        const statusMessage = document.getElementById('statusMessage');
+        const loginView = document.getElementById('loginView');
+        const userView = document.getElementById('userView');
+        const adminView = document.getElementById('adminView');
 
-      const app = initializeApp(firebaseConfig);
-      const auth = getAuth(app);
-      const db = getFirestore(app);
+        // --- DOM 元素 (登入) ---
+        const emailInput = document.getElementById('emailInput');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginButton = document.getElementById('loginButton');
+        const loginError = document.getElementById('loginError');
 
-      const $ = (id) => document.getElementById(id);
-      const msg = $("msg");
-      const viewLogin = $("view-login");
-      const viewAdmin = $("view-admin");
-      const viewUser = $("view-user");
-      const nowText = $("nowText");
+        // --- DOM 元素 (使用者) ---
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const nameInput = document.getElementById('nameInput');
+        const registerButton = document.getElementById('registerButton');
+        const userLogsList = document.getElementById('userLogsList');
+        const checkInButton = document.getElementById('checkInButton');
+        const dateDisplay = document.getElementById('date-display');
+        const timeDisplay = document.getElementById('time-display');
+        const checkInButtonText = document.getElementById('checkInButtonText');
+        const videoContainer = document.getElementById('videoContainer');
+        const snapshotContainer = document.getElementById('snapshotContainer');
+        const snapshotCanvas = document.getElementById('snapshotCanvas');
+        const snapshotName = document.getElementById('snapshotName');
+        const snapshotTime = document.getElementById('snapshotTime');
+        const logoutButtonUser = document.getElementById('logoutButtonUser');
+        
+        // --- DOM 元素 (管理員) ---
+        const adminFacesList = document.getElementById('adminFacesList');
+        const adminLogsList = document.getElementById('adminLogsList');
+        const logoutButtonAdmin = document.getElementById('logoutButtonAdmin');
 
-      // Human 設定
-      const human = new HumanLib.Human({
-        modelBasePath: "https://cdn.jsdelivr.net/npm/@vladmandic/human@3.5.1/models",
-        cacheModels: true,
-        warmup: "none",
-        face: { enabled: true, detector: { rotation: true }, mesh: false, attention: false, description: true, embedding: true },
-      });
-      try { await human.load(); } catch (e) { console.error(e); }
+        // --- 全局變數 ---
+        let db, auth, userId, appId;
+        let registeredFaces = []; // 本地快取 (從 Firebase 同步)
+        let checkInLog = new Set(); // 本地快取 (防止重複打卡)
+        let faceMatcher;
+        let facesCollectionRef, checkInsCollectionRef; // Firestore 引用
+        let dateTimeInterval, recognitionInterval; // 計時器
+        let localStream; // 攝影機串流
 
-      function setView(which) {
-        viewLogin.classList.add("hidden");
-        viewAdmin.classList.add("hidden");
-        viewUser.classList.add("hidden");
-        which.classList.remove("hidden");
-      }
-
-      async function getRole(uid) {
-        const r = await getDoc(doc(db, "roles", uid));
-        return r.exists() ? r.data().role : "user";
-      }
-
-      async function setRole(uid, role) {
-        await setDoc(doc(db, "roles", uid), { role }, { merge: true });
-      }
-
-      function showMsg(text) { msg.textContent = text || ""; }
-
-      function startClock() {
-        const fmt = (n) => String(n).padStart(2, "0");
-        setInterval(() => {
-          const d = new Date();
-          const s = `${d.getFullYear()}/${fmt(d.getMonth()+1)}/${fmt(d.getDate())} ${fmt(d.getHours())}:${fmt(d.getMinutes())}:${fmt(d.getSeconds())}`;
-          nowText.textContent = s;
-        }, 1000);
-      }
-      startClock();
-
-      // 登入/註冊/重設
-      $("btnSignIn").addEventListener("click", async () => {
-        const email = $("email").value.trim();
-        const password = $("password").value;
-        if (!email || !password) return showMsg("請輸入帳密");
-        try {
-          await signInWithEmailAndPassword(auth, email, password);
-          showMsg("登入成功");
-        } catch (err) { showMsg(err.code || err.message); }
-      });
-      $("btnSignUp").addEventListener("click", async () => {
-        const email = $("email").value.trim();
-        const password = $("password").value;
-        if (!email || !password) return showMsg("請輸入帳密");
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-          showMsg("已建立帳號");
-        } catch (err) { showMsg(err.code || err.message); }
-      });
-      $("btnReset").addEventListener("click", async () => {
-        const email = $("email").value.trim();
-        if (!email) return showMsg("輸入 Email");
-        try { await sendPasswordResetEmail(auth, email); showMsg("已寄出重設信"); } catch (err) { showMsg(err.code || err.message); }
-      });
-      $("btnSignOut").addEventListener("click", async () => { try { await signOut(auth); showMsg("已登出"); setView(viewLogin); } catch (err) { showMsg(err.code || err.message); } });
-
-      onAuthStateChanged(auth, async (user) => {
-        if (!user) return setView(viewLogin);
-        const role = await getRole(user.uid);
-        if (role === "admin") setView(viewAdmin); else setView(viewUser);
-      });
-
-      // 設為管理員
-      $("btnMakeAdmin").addEventListener("click", async () => {
-        const user = auth.currentUser; if (!user) return;
-        await setRole(user.uid, "admin"); showMsg("已設為管理員"); setView(viewAdmin);
-      });
-
-      // 相機工具
-      async function startCam(videoEl) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-        videoEl.srcObject = stream; await videoEl.play();
-        return stream;
-      }
-      function stopCam(videoEl) {
-        const s = videoEl.srcObject; if (s) s.getTracks().forEach(t => t.stop()); videoEl.srcObject = null;
-      }
-      function cropFaceToImage(videoEl, face) {
-        const c = document.createElement("canvas");
-        const { x, y, width, height } = face.box;
-        c.width = width; c.height = height;
-        const ctx = c.getContext("2d");
-        ctx.drawImage(videoEl, x, y, width, height, 0, 0, width, height);
-        return c.toDataURL("image/png");
-      }
-      // 取得所有註冊人臉
-      async function fetchFaces() {
-        const snap = await getDocs(collection(db, "faces"));
-        const arr = []; snap.forEach(d => { const v = d.data(); arr.push({ name: v.name, embedding: v.embedding }); });
-        return arr;
-      }
-      function distance(a, b) {
-        let s = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) { const d = (a[i] - b[i]); s += d * d; } return Math.sqrt(s);
-      }
-
-      // 後台：註冊人臉
-      let regStream;
-      $("btnStartRegCam").addEventListener("click", async () => {
-        if (regStream) { stopCam($("regVideo")); regStream = null; }
-        regStream = await startCam($("regVideo"));
-        const res = await human.detect($("regVideo"));
-        const thumbs = $("regThumbs"); thumbs.innerHTML = "";
-        res.face.forEach(f => {
-          const img = cropFaceToImage($("regVideo"), f);
-          const div = document.createElement("div"); div.className = "thumb";
-          div.innerHTML = `<img src="${img}"/><div class="label">臉</div>`; thumbs.appendChild(div);
-        });
-      });
-      $("btnSaveFace").addEventListener("click", async () => {
-        const name = $("faceName").value.trim(); if (!name) return showMsg("姓名");
-        const res = await human.detect($("regVideo")); if (!res.face[0]) return showMsg("未偵測到臉");
-        const emb = Array.from(res.face[0].embedding || []);
-        await addDoc(collection(db, "faces"), { name, embedding: emb });
-        showMsg("已儲存人臉");
-      });
-
-      // 前台：打卡與辨識
-      let userStream; let knownFaces = [];
-      async function ensureKnownFaces() { knownFaces = await fetchFaces(); }
-      await ensureKnownFaces();
-      $("btnCheckin").addEventListener("click", async () => {
-        if (userStream) { stopCam($("userVideo")); userStream = null; }
-        userStream = await startCam($("userVideo"));
-        await ensureKnownFaces();
-        const res = await human.detect($("userVideo"));
-        const thumbs = $("userThumbs"); thumbs.innerHTML = "";
-        const d = new Date(); const timeText = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
-        for (const f of res.face) {
-          const img = cropFaceToImage($("userVideo"), f);
-          let label = "陌生人"; let best = { name:"", dist: 99 };
-          if (f.embedding && knownFaces.length) {
-            for (const k of knownFaces) {
-              const dist = distance(Array.from(f.embedding), k.embedding);
-              if (dist < best.dist) best = { name: k.name, dist };
+        // --- 顯示狀態訊息 ---
+        function showStatus(message, type = 'info') {
+            statusMessage.textContent = message;
+            statusMessage.classList.remove('hidden', 'bg-blue-100', 'bg-red-100', 'bg-green-100');
+            if (type === 'error') {
+                statusMessage.classList.add('bg-red-100', 'border-red-400', 'text-red-700');
+            } else if (type === 'success') {
+                statusMessage.classList.add('bg-green-100', 'border-green-400', 'text-green-700');
+            } else {
+                statusMessage.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
             }
-            if (best.dist < 0.6) label = `${best.name}｜${timeText}`; // 辨識
-          }
-          const div = document.createElement("div"); div.className = "thumb";
-          div.innerHTML = `<img src="${img}"/><div class="label">${label}</div>`; thumbs.appendChild(div);
-          const user = auth.currentUser;
-          await addDoc(collection(db, "attendance"), { uid: user ? user.uid : null, label, time: timeText, recognized: label !== "陌生人" });
         }
-      });
+
+        // --- 視圖切換 ---
+        function showView(viewName) {
+            loginView.classList.add('hidden');
+            userView.classList.add('hidden');
+            adminView.classList.add('hidden');
+            statusMessage.classList.add('hidden'); // 切換視圖時隱藏狀態
+
+            if (viewName === 'login') {
+                loginView.classList.remove('hidden');
+            } else if (viewName === 'user') {
+                userView.classList.remove('hidden');
+                setupUserView();
+            } else if (viewName === 'admin') {
+                adminView.classList.remove('hidden');
+                setupAdminView();
+            }
+        }
+
+        // 1. 加載 face-api 模型
+        async function loadModels() {
+            showStatus('正在加載臉部辨識模型，請稍候...');
+            // 修正：使用穩定且正確的 jsDelivr NPM 路徑
+            const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights'; 
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+                    faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL)
+                ]);
+                showStatus('模型加載完成。正在初始化 Firebase...', 'success');
+            } catch (error) {
+                console.error("模型加載失敗：", error);
+                showStatus('模型加載失敗。請重新整理頁面。', 'error');
+                throw error; // 中斷執行
+            }
+        }
+
+        // 2. 初始化 Firebase
+        async function initFirebase() {
+            try {
+                // --- 寫入您提供的 Firebase 設定 ---
+                const firebaseConfig = {
+                    apiKey: "AIzaSyCyTFIQn-gTHX8ipQ-oekus_d3Sg1kiHNY",
+                    authDomain: "nw-face-checkin.firebaseapp.com",
+                    projectId: "nw-face-checkin",
+                    storageBucket: "nw-face-checkin.firebasestorage.app",
+                    messagingSenderId: "187703864109",
+                    appId: "1:187703864109:web:675ba96fe40c111512c1a4",
+                    measurementId: "G-NRDLBL3NJP"
+                };
+
+                // 使用您的 projectId (或 appId) 作為唯一的路徑ID
+                appId = firebaseConfig.projectId || 'nw-face-checkin'; 
+                
+                if (!firebaseConfig.apiKey) {
+                    showStatus('Firebase 設定檔遺失。', 'error');
+                    throw new Error("Firebase config not found.");
+                }
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug'); // 開啟日誌
+
+                // --- 核心：驗證狀態監聽 ---
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        // 使用者已登入
+                        userId = user.uid;
+                        showStatus('驗證成功，正在檢查角色...', 'success');
+
+                        // 設置 Firestore 引用 (改為公有路徑)
+                        const facesPath = `artifacts/${appId}/public/faces`;
+                        const checkInsPath = `artifacts/${appId}/public/check_ins`;
+                        facesCollectionRef = collection(db, facesPath);
+                        checkInsCollectionRef = collection(db, checkInsPath);
+
+                        // 啟動全局監聽器
+                        listenToFaces();
+                        listenToCheckIns();
+
+                        // 檢查角色
+                        await checkUserRole(userId);
+
+                    } else {
+                        // 使用者未登入
+                        userId = null;
+                        if (dateTimeInterval) clearInterval(dateTimeInterval);
+                        if (recognitionInterval) clearInterval(recognitionInterval);
+                        stopVideo();
+                        showView('login');
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase 初始化失敗：", error);
+                showStatus(`Firebase 初始化失敗。 ${error.message}`, 'error');
+            }
+        }
+
+        // 3. 檢查使用者角色
+        async function checkUserRole(uid) {
+            try {
+                // 路徑修正：角色文件也應在公有路徑下
+                const roleDocRef = doc(db, `artifacts/${appId}/public/user_roles`, uid);
+                const docSnap = await getDoc(roleDocRef);
+
+                if (docSnap.exists() && docSnap.data().role === 'admin') {
+                    // 是管理員
+                    showView('admin');
+                } else {
+                    // 是一般使用者
+                    showView('user');
+                }
+            } catch (error) {
+                console.error("檢查角色失敗:", error);
+                showStatus('檢查使用者角色失敗，預設為一般使用者。', 'error');
+                showView('user');
+            }
+        }
+
+        // 4. 設置前台/後台
+        function setupUserView() {
+            // 啟動即時時間
+            if (dateTimeInterval) clearInterval(dateTimeInterval);
+            dateTimeInterval = setInterval(updateDateTime, 1000);
+            updateDateTime();
+
+            // 綁定打卡按鈕事件
+            checkInButton.onclick = onCheckInButtonClick;
+            registerButton.onclick = onRegisterClick;
+            logoutButtonUser.onclick = handleLogout;
+        }
+
+        function setupAdminView() {
+            // 監聽器 (listenToFaces, listenToCheckIns) 已經在 onAuthStateChanged 啟動
+            // 它們會自動填充 #adminFacesList 和 #adminLogsList
+            logoutButtonAdmin.onclick = handleLogout;
+        }
+
+        // 5. 即時日期時間
+        function updateDateTime() {
+            const now = new Date();
+            dateDisplay.textContent = now.toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+            timeDisplay.textContent = now.toLocaleTimeString('zh-TW', { hour12: false });
+        }
+
+        // 6. 登入/登出 處理
+        async function handleLogin() {
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            loginError.textContent = '';
+            loginButton.disabled = true;
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                // onAuthStateChanged 會自動處理後續
+            } catch (error) {
+                console.error("登入失敗:", error.code);
+                loginError.textContent = '登入失敗，請檢查帳號或密碼。';
+                loginButton.disabled = false;
+            }
+        }
+
+        async function handleLogout() {
+            await signOut(auth);
+            // onAuthStateChanged 會自動處理後續 (導向登入頁)
+        }
+
+        // 7. (Firebase) 監聽臉部資料庫
+        function listenToFaces() {
+            onSnapshot(query(facesCollectionRef), (snapshot) => {
+                registeredFaces = [];
+                let faceListHtml = '';
+                
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const descriptor = new Float32Array(data.descriptor);
+                    registeredFaces.push(new faceapi.LabeledFaceDescriptors(data.name, [descriptor]));
+                    
+                    // 填充管理員列表
+                    faceListHtml += `<div class="p-2 border-b"><p class="font-semibold text-gray-700">${data.name}</p></div>`;
+                });
+
+                // 重建 FaceMatcher
+                if (registeredFaces.length > 0) {
+                    faceMatcher = new faceapi.FaceMatcher(registeredFaces, 0.6);
+                    if(adminFacesList) adminFacesList.innerHTML = faceListHtml;
+                    showStatus(`已同步 ${registeredFaces.length} 筆臉部資料。`, 'success');
+                } else {
+                    if(adminFacesList) adminFacesList.innerHTML = '<p class="text-gray-500 text-center">尚無臉部資料。</p>';
+                }
+            }, (error) => {
+                console.error("監聽臉部資料失敗:", error);
+                showStatus('監聽臉部資料失敗。', 'error');
+            });
+        }
+
+        // 8. (Firebase) 監聽打卡紀錄
+        function listenToCheckIns() {
+            const q = query(checkInsCollectionRef); // 拿全部資料
+            onSnapshot(q, (snapshot) => {
+                let logHtml = '';
+                let docs = snapshot.docs.map(doc => doc.data());
+                
+                docs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)); // 降序
+
+                if (docs.length === 0) {
+                    logHtml = '<p class="text-gray-500 text-center">尚無打卡紀錄...</p>';
+                }
+
+                docs.forEach((data) => {
+                    const name = data.name;
+                    const time = data.timestamp ? data.timestamp.toDate() : new Date();
+                    const timeString = time.toLocaleString('zh-TW', { hour12: false });
+
+                    logHtml += `
+                        <div class="p-2 border-b border-gray-200">
+                            <p class="font-semibold text-red-700">${name}</p>
+                            <p class="text-sm text-gray-600">打卡時間：${timeString}</p>
+                        </div>
+                    `;
+                    
+                    // 填充本地 Set (簡易版，僅限今日)
+                    const today = new Date().toLocaleDateString();
+                    if (time.toLocaleDateString() === today) {
+                        checkInLog.add(name); 
+                    }
+                });
+
+                if(userLogsList) userLogsList.innerHTML = logHtml;
+                if(adminLogsList) adminLogsList.innerHTML = logHtml;
+
+            }, (error) => {
+                console.error("監聽打卡紀錄失敗:", error);
+            });
+        }
+
+        // 9. 註冊人臉
+        async function onRegisterClick() {
+            if (!userId) {
+                showStatus('Firebase 尚未準備就緒，請稍候。', 'error');
+                return;
+            }
+            const name = nameInput.value.trim();
+            if (!name) {
+                showStatus('請輸入姓名！', 'error');
+                return;
+            }
+
+            // 註冊時也需要開啟相機
+            if (!localStream) {
+                showStatus('正在啟動相機以進行註冊...', 'info');
+                await startVideo();
+                if (!localStream) { // 如果 startVideo 失敗
+                    showStatus('無法啟動相機進行註冊。', 'error');
+                    return;
+                }
+            }
+
+            showStatus(`正在註冊 ${name}... 請直視鏡頭。`, 'info');
+            registerButton.disabled = true;
+
+            try {
+                const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                                             .withFaceLandmarks()
+                                             .withFaceDescriptor();
+
+                if (!detection) {
+                    showStatus('註冊失敗，未偵測到臉部。', 'error');
+                    registerButton.disabled = false;
+                    return;
+                }
+
+                showStatus(`偵測完畢，正在上傳 ${name} 的資料到 Firebase...`, 'info');
+                
+                const faceData = {
+                    name: name,
+                    descriptor: Array.from(detection.descriptor)
+                };
+
+                await addDoc(facesCollectionRef, faceData);
+                showStatus(`${name} 註冊成功！資料已儲存。`, 'success');
+                nameInput.value = '';
+                checkInLog.delete(name); // 允許重新打卡
+
+            } catch (error) {
+                console.error("註冊失敗：", error);
+                showStatus('註冊時發生錯誤。', 'error');
+            }
+            registerButton.disabled = false;
+        }
+
+        // 10. 打卡按鈕控制
+        function onCheckInButtonClick() {
+            if (localStream) {
+                // 正在打卡 -> 停止
+                stopVideo();
+                if (recognitionInterval) clearInterval(recognitionInterval);
+                videoContainer.classList.add('hidden');
+                snapshotContainer.classList.add('hidden');
+                checkInButtonText.textContent = '點此開始打卡';
+                checkInButton.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                checkInButton.classList.add('bg-red-600', 'hover:bg-red-700');
+
+            } else {
+                // 停止 -> 開始打卡
+                startVideo();
+                videoContainer.classList.remove('hidden');
+                snapshotContainer.classList.remove('hidden');
+                checkInButtonText.textContent = '停止辨識';
+                checkInButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                checkInButton.classList.add('bg-gray-600', 'hover:bg-gray-700');
+            }
+        }
+
+        // 11. 啟動/停止攝影機
+        async function startVideo() {
+            if (localStream) return; // 如果已經啟動，則不重複
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                video.srcObject = localStream;
+                video.addEventListener('play', () => {
+                    const displaySize = { width: video.clientWidth, height: video.clientHeight };
+                    faceapi.matchDimensions(canvas, displaySize);
+                    
+                    // 啟動人臉辨識循環
+                    if (recognitionInterval) clearInterval(recognitionInterval);
+                    recognitionInterval = setInterval(runRecognition, 500); // 辨識頻率 (500ms)
+                });
+            } catch (err) {
+                console.error("無法存取攝影機：", err);
+                showStatus('無法存取攝影機。請檢查權限設定。', 'error');
+                localStream = null;
+            }
+        }
+
+        function stopVideo() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+                video.srcObject = null;
+                if (recognitionInterval) clearInterval(recognitionInterval);
+
+                // 清理快照
+                const sCtx = snapshotCanvas.getContext('2d');
+                sCtx.clearRect(0, 0, snapshotCanvas.width, snapshotCanvas.height);
+                snapshotName.textContent = '...';
+                snapshotTime.textContent = '';
+            }
+        }
+
+        // 12. 即時辨識循環 (核心)
+        async function runRecognition() {
+            if (!video.paused && faceMatcher && localStream) { 
+                const displaySize = { width: video.clientWidth, height: video.clientHeight };
+                if (displaySize.width === 0 || displaySize.height === 0) return; 
+
+                faceapi.matchDimensions(canvas, displaySize);
+
+                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                                                .withFaceLandmarks()
+                                                .withFaceDescriptors();
+
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                const sCtx = snapshotCanvas.getContext('2d');
+                sCtx.clearRect(0, 0, snapshotCanvas.width, snapshotCanvas.height);
+
+                if (resizedDetections.length > 0) {
+                    const d = resizedDetections[0]; // 只處理第一張臉
+                    const result = faceMatcher.findBestMatch(d.descriptor);
+                    
+                    // 1. 在主畫面上畫框
+                    const box = d.detection.box;
+                    const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString(), boxColor: 'red' });
+                    drawBox.draw(canvas);
+
+                    // 2. 畫出快照
+                    sCtx.drawImage(video, box.x, box.y, box.width, box.height, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+
+                    // 3. 處理打卡邏輯
+                    if (result.label !== 'unknown') {
+                        snapshotName.textContent = result.label;
+                        
+                        if (!checkInLog.has(result.label)) {
+                            // 尚未打卡 -> 執行打卡
+                            snapshotTime.textContent = `打卡成功 @ ${new Date().toLocaleTimeString()}`;
+                            snapshotTime.classList.remove('text-yellow-600');
+                            snapshotTime.classList.add('text-green-600');
+                            
+                            logCheckIn(result.label); // 寫入 Firebase
+                            checkInLog.add(result.label); // 加入本地快取
+                        } else {
+                            // 已打卡
+                            snapshotTime.textContent = '今日已打卡';
+                            snapshotTime.classList.remove('text-green-600');
+                            snapshotTime.classList.add('text-yellow-600');
+                        }
+                    } else {
+                        // 陌生人
+                        snapshotName.textContent = '陌生人';
+                        snapshotTime.textContent = '';
+                    }
+                } else {
+                    // 沒偵測到
+                    snapshotName.textContent = '未偵測到人臉';
+                    snapshotTime.textContent = '';
+                }
+            }
+        }
+
+        // 13. 紀錄打卡 (寫入 Firebase)
+        async function logCheckIn(name) {
+            try {
+                await addDoc(checkInsCollectionRef, {
+                    name: name,
+                    timestamp: serverTimestamp() 
+                });
+                // onSnapshot 會自動更新 UI
+            } catch (error) {
+                console.error("寫入打卡紀錄失敗:", error);
+                checkInLog.delete(name); // 允許重試
+            }
+        }
+
+        // 14. 啟動程式
+        async function main() {
+            await loadModels(); // 1. 加載 face-api 模型
+            await initFirebase(); // 2. 初始化 Firebase 並啟動驗證監聽
+            
+            // 綁定登入按鈕
+            loginButton.onclick = handleLogin;
+        }
+
+        main();
     </script>
-  </body>
+</body>
 </html>
